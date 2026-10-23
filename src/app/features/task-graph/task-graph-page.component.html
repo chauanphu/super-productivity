@@ -1,0 +1,72 @@
+<div class="header">
+  <h2>{{ T.F.TASK_GRAPH.TITLE | translate }}</h2>
+  <select
+    name="project"
+    [attr.aria-label]="T.F.TASK_GRAPH.PROJECT | translate"
+    [value]="projectId()"
+    (change)="switchProject($any($event.target).value)"
+  >
+    @for (p of projectService.listSortedForUI(); track p.id) {
+      <option [value]="p.id">{{ p.title }}</option>
+    }
+  </select>
+  <div
+    class="filter"
+    role="group"
+    [attr.aria-label]="T.F.TASK_GRAPH.FILTER | translate"
+  >
+    @for (s of STATUSES; track s.status) {
+      <label>
+        <input
+          type="checkbox"
+          [checked]="statusFilter().has(s.status)"
+          (change)="toggleStatus(s.status)"
+        />
+        {{ s.label | translate }}
+      </label>
+    }
+  </div>
+  <p class="legend">{{ T.F.TASK_GRAPH.LEGEND | translate }}</p>
+</div>
+<div class="body">
+  <div class="canvas">
+    <div
+      #container
+      class="graph"
+      role="img"
+      [attr.aria-label]="T.F.TASK_GRAPH.GRAPH | translate"
+    ></div>
+    <button
+      type="button"
+      class="fit"
+      (click)="fit()"
+    >
+      {{ T.F.TASK_GRAPH.FIT | translate }}
+    </button>
+  </div>
+  <ul
+    class="node-list"
+    [attr.aria-label]="T.F.TASK_GRAPH.NODE_LIST | translate"
+  >
+    @for (n of nodeList(); track n.id) {
+      <li>
+        <button
+          type="button"
+          (click)="selectedId.set(n.id)"
+        >
+          {{ n.title }} · {{ STATUS_LABEL[n.status] | translate }}
+        </button>
+      </li>
+    }
+  </ul>
+  @if (tasks().length === 0) {
+    <p class="empty">{{ T.F.TASK_GRAPH.EMPTY | translate }}</p>
+  }
+  @if (selectedTask(); as task) {
+    <task-graph-drawer
+      [task]="task"
+      [projectTasks]="tasks()"
+      (closed)="selectedId.set(null)"
+    />
+  }
+</div>

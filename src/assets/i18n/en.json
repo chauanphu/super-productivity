@@ -1695,6 +1695,37 @@
         "TOGGLE_DONE": "Toggle completed status"
       }
     },
+    "TASK_GRAPH": {
+      "CLOSE": "Close",
+      "DETAILS": "Task details",
+      "EMPTY": "No tasks in this project yet",
+      "ESTIMATE_MIN": "Estimate (minutes)",
+      "FILTER": "Show statuses",
+      "FIT": "Fit to screen",
+      "GRAPH": "Task dependency graph",
+      "LEGEND": "Dashed: waiting for prerequisites. Outlined: ready to start.",
+      "NAV": "Graph",
+      "NODE_LIST": "Tasks",
+      "PENDING_NOTE": "Condition to resume",
+      "PLAN_DAY": "Plan for day",
+      "PREREQUISITES": "Prerequisites",
+      "PROJECT": "Project",
+      "SMART": "SMART",
+      "SMART_A_CONFIDENCE": "Confidence (1-5)",
+      "SMART_M_CURRENT": "Current",
+      "SMART_M_TARGET": "Target",
+      "SMART_M_UNIT": "Unit",
+      "SMART_R": "Relevant: goal this serves",
+      "SMART_S": "Specific: done when…",
+      "SMART_T": "Deadline",
+      "STATUS": "Status",
+      "STATUS_DOING": "In progress",
+      "STATUS_DONE": "Done",
+      "STATUS_PENDING": "Pending",
+      "STATUS_TODO": "Not started",
+      "TITLE": "Task graph",
+      "WARN_BEFORE_PREREQ": "This day is earlier than a prerequisite's planned day"
+    },
     "TASK_REPEAT": {
       "ADD_INFO_PANEL": {
         "CUSTOM": "Custom recur config",

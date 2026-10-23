@@ -121,3 +121,7 @@ data/
 /.secrets.example
 
 .worktrees/
+
+# local design-review tooling output
+.superpowers/
+.taste-skill/

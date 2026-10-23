@@ -24,6 +24,16 @@
   </button>
 }
 
+@if (isForProject) {
+  <button
+    [routerLink]="[base, contextId, 'graph']"
+    mat-menu-item
+  >
+    <mat-icon>account_tree</mat-icon>
+    <span class="text">{{ T.F.TASK_GRAPH.NAV | translate }}</span>
+  </button>
+}
+
 @if (contextId === TODAY_TAG_ID) {
   <button
     (click)="unplanAllTodayTasks()"

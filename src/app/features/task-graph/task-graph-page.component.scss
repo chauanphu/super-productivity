@@ -1,0 +1,134 @@
+@use '../../../styles/_globals.scss' as *;
+
+:host {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  height: 100%;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s) var(--s2);
+  padding: var(--s) var(--s2);
+
+  h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+  }
+}
+
+select {
+  padding: var(--s-half) var(--s);
+  border: 1px solid var(--divider-color);
+  border-radius: var(--card-border-radius);
+  background: var(--card-bg);
+  color: var(--text-color);
+}
+
+.filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+
+  label {
+    display: flex;
+    align-items: center;
+    gap: var(--s-half);
+    cursor: pointer;
+  }
+}
+
+.legend {
+  margin: 0;
+  color: var(--text-color-muted);
+  font-size: 12px;
+}
+
+select:focus-visible,
+input:focus-visible,
+button:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  border-top: 1px solid var(--divider-color);
+}
+
+.graph {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.fit {
+  position: absolute;
+  top: var(--s);
+  right: var(--s);
+  padding: var(--s-half) var(--s);
+  border: 1px solid var(--divider-color);
+  border-radius: var(--card-border-radius);
+  background: var(--card-bg);
+  color: var(--text-color);
+  cursor: pointer;
+}
+
+// visually hidden until a keyboard user focuses into it
+.node-list:not(:focus-within) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.node-list:focus-within {
+  position: absolute;
+  top: var(--s);
+  left: var(--s);
+  max-height: 60%;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--s);
+  list-style: none;
+  background: var(--card-bg);
+  border: 1px solid var(--divider-color);
+  border-radius: var(--card-border-radius);
+}
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+// below xs the drawer overlays the bottom half instead of squeezing the graph
+@include mq(xs, max) {
+  task-graph-drawer {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    max-height: 60%;
+    border-top: 1px solid var(--divider-color);
+    border-left: 0;
+    background: var(--card-bg);
+  }
+}
