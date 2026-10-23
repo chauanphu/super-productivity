@@ -124,6 +124,7 @@ export class TaskGraphPageComponent {
         container: this._container().nativeElement,
         style: STYLE,
         userZoomingEnabled: true,
+        maxZoom: 1.2, // keep a graph with few nodes from being fitted to huge size
         autoungrabify: true, // read-only: nodes cannot be dragged
       });
       this._cy.on('tap', 'node', (ev) => this.selectedId.set(ev.target.id()));
@@ -136,6 +137,11 @@ export class TaskGraphPageComponent {
       this.tasks();
       this.statusFilter();
       this._renderGraph();
+    });
+    effect(() => {
+      // the drawer changes the container width, so Cytoscape must re-measure
+      this.selectedId();
+      setTimeout(() => this._cy?.resize());
     });
     inject(DestroyRef).onDestroy(() => this._cy?.destroy());
   }

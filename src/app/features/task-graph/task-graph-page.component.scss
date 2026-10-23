@@ -1,5 +1,6 @@
 :host {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   height: 100%;
 }
@@ -21,6 +22,8 @@
 
 .graph {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .empty {

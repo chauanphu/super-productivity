@@ -2,7 +2,8 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: 360px;
+  flex: 0 0 360px;
+  box-sizing: border-box;
   overflow-y: auto;
   padding: 16px;
   border-left: 1px solid var(--divider-color);
