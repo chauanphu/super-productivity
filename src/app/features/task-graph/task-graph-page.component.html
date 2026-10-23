@@ -1,0 +1,37 @@
+<div class="header">
+  <h2>{{ T.F.TASK_GRAPH.TITLE | translate }}</h2>
+  <select
+    [value]="projectId()"
+    (change)="switchProject($any($event.target).value)"
+  >
+    @for (p of projectService.listSortedForUI(); track p.id) {
+      <option [value]="p.id">{{ p.title }}</option>
+    }
+  </select>
+  @for (s of STATUSES; track s.status) {
+    <label>
+      <input
+        type="checkbox"
+        [checked]="statusFilter().has(s.status)"
+        (change)="toggleStatus(s.status)"
+      />
+      {{ s.label | translate }}
+    </label>
+  }
+</div>
+<div class="body">
+  <div
+    #container
+    class="graph"
+  ></div>
+  @if (tasks().length === 0) {
+    <p class="empty">{{ T.F.TASK_GRAPH.EMPTY | translate }}</p>
+  }
+  @if (selectedTask(); as task) {
+    <task-graph-drawer
+      [task]="task"
+      [projectTasks]="tasks()"
+      (closed)="selectedId.set(null)"
+    />
+  }
+</div>

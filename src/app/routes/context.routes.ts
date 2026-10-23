@@ -41,5 +41,13 @@ export const PROJECT_CHILD_ROUTES: Routes = [
     component: ProjectTaskPageComponent,
     data: { page: 'project-tasks' },
   },
+  {
+    path: 'graph',
+    loadComponent: () =>
+      import('../features/task-graph/task-graph-page.component').then(
+        (m) => m.TaskGraphPageComponent,
+      ),
+    data: { page: 'project-graph' },
+  },
   ...SHARED_CONTEXT_ROUTES,
 ];

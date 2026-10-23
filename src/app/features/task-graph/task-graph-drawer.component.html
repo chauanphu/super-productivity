@@ -1,0 +1,119 @@
+<div class="head">
+  <h3>{{ task().title }} · SMART {{ score() }}/5</h3>
+  <button (click)="closed.emit()">{{ T.F.TASK_GRAPH.CLOSE | translate }}</button>
+</div>
+
+<label>
+  {{ T.F.TASK_GRAPH.STATUS | translate }}
+  <select (change)="setStatus($any($event.target).value)">
+    @for (s of STATUSES; track s.status) {
+      <option
+        [value]="s.status"
+        [selected]="s.status === status()"
+      >
+        {{ s.label | translate }}
+      </option>
+    }
+  </select>
+</label>
+
+@if (status() === 'pending') {
+  <label>
+    {{ T.F.TASK_GRAPH.PENDING_NOTE | translate }}
+    <input
+      [value]="task().pendingNote ?? ''"
+      (change)="setPendingNote($any($event.target).value)"
+    />
+  </label>
+}
+
+<fieldset>
+  <legend>{{ T.F.TASK_GRAPH.PREREQUISITES | translate }}</legend>
+  @for (o of options(); track o.id) {
+    <label>
+      <input
+        type="checkbox"
+        [checked]="task().dependsOnIds?.includes(o.id)"
+        (change)="togglePrerequisite(o.id)"
+      />
+      {{ o.title }}
+    </label>
+  }
+</fieldset>
+
+<label>
+  {{ T.F.TASK_GRAPH.SMART_S | translate }}
+  <input
+    [value]="task().smart?.specific ?? ''"
+    (change)="setSmart({ specific: $any($event.target).value })"
+  />
+</label>
+<label>
+  {{ T.F.TASK_GRAPH.SMART_M_UNIT | translate }}
+  <input
+    [value]="task().smart?.metric?.unit ?? ''"
+    (change)="setMetric({ unit: $any($event.target).value })"
+  />
+</label>
+<label>
+  {{ T.F.TASK_GRAPH.SMART_M_TARGET | translate }}
+  <input
+    type="number"
+    [value]="task().smart?.metric?.target ?? 0"
+    (change)="setMetric({ target: +$any($event.target).value })"
+  />
+</label>
+<label>
+  {{ T.F.TASK_GRAPH.SMART_M_CURRENT | translate }}
+  <input
+    type="number"
+    [value]="task().smart?.metric?.current ?? 0"
+    (change)="setMetric({ current: +$any($event.target).value })"
+  />
+</label>
+<label>
+  {{ T.F.TASK_GRAPH.ESTIMATE_MIN | translate }}
+  <input
+    type="number"
+    min="0"
+    [value]="task().timeEstimate / 60000"
+    (change)="setEstimateMinutes($any($event.target).value)"
+  />
+</label>
+<label>
+  {{ T.F.TASK_GRAPH.SMART_A_CONFIDENCE | translate }}
+  <input
+    type="number"
+    min="1"
+    max="5"
+    [value]="task().smart?.confidence ?? ''"
+    (change)="setSmart({ confidence: +$any($event.target).value || undefined })"
+  />
+</label>
+<label>
+  {{ T.F.TASK_GRAPH.SMART_R | translate }}
+  <input
+    [value]="task().smart?.relevance ?? ''"
+    (change)="setSmart({ relevance: $any($event.target).value })"
+  />
+</label>
+<label>
+  {{ T.F.TASK_GRAPH.SMART_T | translate }}
+  <input
+    type="date"
+    [value]="task().deadlineDay ?? ''"
+    (change)="setDeadline($any($event.target).value)"
+  />
+</label>
+
+<label>
+  {{ T.F.TASK_GRAPH.PLAN_DAY | translate }}
+  <input
+    type="date"
+    [value]="task().dueDay ?? ''"
+    (change)="planForDay($any($event.target).value)"
+  />
+</label>
+@if (isPlanDayWarning()) {
+  <p class="warn">{{ T.F.TASK_GRAPH.WARN_BEFORE_PREREQ | translate }}</p>
+}

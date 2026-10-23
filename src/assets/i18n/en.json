@@ -1698,6 +1698,7 @@
     "TASK_GRAPH": {
       "CLOSE": "Close",
       "EMPTY": "No tasks in this project yet",
+      "ESTIMATE_MIN": "Estimate (minutes)",
       "NAV": "Graph",
       "PENDING_NOTE": "Condition to resume",
       "PLAN_DAY": "Plan for day",
