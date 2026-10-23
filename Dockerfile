@@ -22,6 +22,8 @@ RUN apt-get update && \
     && git config --global url."https://github.com/".insteadOf ssh://git@github.com/
 
 # Copy and install dependencies
+# npm 10 (bundled with node:22) crashes on this lockfile ("reading 'edgesOut'"); npm 11 installs it fine
+RUN npm install -g npm@11
 COPY package*.json ./
 COPY packages/plugin-api/package*.json ./packages/plugin-api/
 COPY packages/plugin-api/tsconfig.json ./packages/plugin-api/
