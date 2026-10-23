@@ -30,6 +30,10 @@ COPY packages/shared-schema/package*.json ./packages/shared-schema/
 COPY packages/shared-schema/tsconfig.json ./packages/shared-schema/
 COPY packages/shared-schema/tsup.config.ts ./packages/shared-schema/
 COPY packages/shared-schema/src ./packages/shared-schema/src
+# npm ci needs every workspace manifest listed by root "workspaces": ["packages/*"]
+COPY packages/plugin-dev/package.json ./packages/plugin-dev/
+COPY packages/vite-plugin/package.json ./packages/vite-plugin/
+COPY packages/super-sync-server/package.json ./packages/super-sync-server/
 COPY tsconfig.json ./
 COPY tools/ ./tools/
 RUN npm ci --ignore-scripts || npm i --ignore-scripts
