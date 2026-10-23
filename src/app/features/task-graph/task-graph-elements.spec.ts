@@ -48,4 +48,18 @@ describe('toCytoscapeElements', () => {
     );
     expect(nodeById(els, 'a').data.label).toContain('SMART 2/5');
   });
+  it('truncates very long titles and marks status with a glyph', () => {
+    const long = 'x'.repeat(80);
+    const els = toCytoscapeElements(
+      [
+        t('a', { title: long, isDone: true }),
+        t('b', { title: 'short', status: 'doing' }),
+      ],
+      ALL,
+    );
+    expect(nodeById(els, 'a').data.label.split('\n')[0].length).toBeLessThan(52);
+    expect(nodeById(els, 'a').data.label).toContain('✓');
+    expect(nodeById(els, 'a').data.label).toContain('…');
+    expect(nodeById(els, 'b').data.label).toContain('◐');
+  });
 });

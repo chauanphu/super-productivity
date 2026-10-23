@@ -1,11 +1,13 @@
+@use '../../../styles/_globals.scss' as *;
+
 :host {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--s2);
   flex: 0 0 360px;
   box-sizing: border-box;
   overflow-y: auto;
-  padding: 16px;
+  padding: var(--s2);
   border-left: 1px solid var(--divider-color);
 }
 
@@ -13,20 +15,123 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--s);
+
+  h3 {
+    min-width: 0;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+}
+
+.score {
+  margin: 0;
+  color: var(--text-color-muted);
+  font-size: 12px;
 }
 
 label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--s-half);
+  font-size: 13px;
 }
 
-fieldset label {
+fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s);
+  min-width: 0;
+  margin: 0;
+  padding: var(--s);
+  border: 1px solid var(--divider-color);
+  border-radius: var(--card-border-radius);
+}
+
+legend {
+  padding: 0 var(--s-half);
+  font-weight: 600;
+}
+
+// long prerequisite lists scroll instead of stretching the drawer
+.prerequisites {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-half);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.check {
   flex-direction: row;
   align-items: center;
+  gap: var(--s);
+
+  span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+.row2,
+.row3 {
+  display: grid;
+  gap: var(--s);
+}
+
+.row2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.row3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+input:not([type='checkbox']),
+select,
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: var(--s-half) var(--s);
+  border: 1px solid var(--divider-color);
+  border-radius: var(--card-border-radius);
+  background: var(--card-bg);
+  color: var(--text-color);
+  font: inherit;
+}
+
+textarea {
+  resize: vertical;
+}
+
+button {
+  padding: var(--s-half) var(--s);
+  border: 1px solid var(--divider-color);
+  border-radius: var(--card-border-radius);
+  background: var(--card-bg);
+  color: var(--text-color);
+  cursor: pointer;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .warn {
+  margin: 0;
   color: var(--c-warn);
+}
+
+// the mobile bottom navigation overlays the page bottom
+@include mq(xs, max) {
+  :host {
+    padding-bottom: calc(var(--bar-height-large) + var(--s2));
+  }
 }

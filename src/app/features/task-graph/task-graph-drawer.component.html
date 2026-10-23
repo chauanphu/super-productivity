@@ -1,11 +1,21 @@
 <div class="head">
-  <h3>{{ task().title }} · SMART {{ score() }}/5</h3>
-  <button (click)="closed.emit()">{{ T.F.TASK_GRAPH.CLOSE | translate }}</button>
+  <h3 [title]="task().title">{{ task().title }}</h3>
+  <button
+    type="button"
+    (click)="closed.emit()"
+  >
+    {{ T.F.TASK_GRAPH.CLOSE | translate }}
+  </button>
 </div>
+<p class="score">{{ T.F.TASK_GRAPH.SMART | translate }} {{ score() }}/5</p>
 
 <label>
   {{ T.F.TASK_GRAPH.STATUS | translate }}
-  <select (change)="setStatus($any($event.target).value)">
+  <select
+    #statusSelect
+    name="status"
+    (change)="setStatus($any($event.target).value)"
+  >
     @for (s of STATUSES; track s.status) {
       <option
         [value]="s.status"
@@ -20,100 +30,138 @@
 @if (status() === 'pending') {
   <label>
     {{ T.F.TASK_GRAPH.PENDING_NOTE | translate }}
-    <input
+    <textarea
+      name="pendingNote"
+      rows="2"
+      autocomplete="off"
       [value]="task().pendingNote ?? ''"
       (change)="setPendingNote($any($event.target).value)"
-    />
+    ></textarea>
   </label>
 }
 
 <fieldset>
   <legend>{{ T.F.TASK_GRAPH.PREREQUISITES | translate }}</legend>
-  @for (o of options(); track o.id) {
-    <label>
-      <input
-        type="checkbox"
-        [checked]="task().dependsOnIds?.includes(o.id)"
-        (change)="togglePrerequisite(o.id)"
-      />
-      {{ o.title }}
-    </label>
-  }
+  <div class="prerequisites">
+    @for (o of options(); track o.id) {
+      <label class="check">
+        <input
+          type="checkbox"
+          [checked]="task().dependsOnIds?.includes(o.id)"
+          (change)="togglePrerequisite(o.id)"
+        />
+        <span>{{ o.title }}</span>
+      </label>
+    }
+  </div>
 </fieldset>
 
-<label>
-  {{ T.F.TASK_GRAPH.SMART_S | translate }}
-  <input
-    [value]="task().smart?.specific ?? ''"
-    (change)="setSmart({ specific: $any($event.target).value })"
-  />
-</label>
-<label>
-  {{ T.F.TASK_GRAPH.SMART_M_UNIT | translate }}
-  <input
-    [value]="task().smart?.metric?.unit ?? ''"
-    (change)="setMetric({ unit: $any($event.target).value })"
-  />
-</label>
-<label>
-  {{ T.F.TASK_GRAPH.SMART_M_TARGET | translate }}
-  <input
-    type="number"
-    [value]="task().smart?.metric?.target ?? 0"
-    (change)="setMetric({ target: +$any($event.target).value })"
-  />
-</label>
-<label>
-  {{ T.F.TASK_GRAPH.SMART_M_CURRENT | translate }}
-  <input
-    type="number"
-    [value]="task().smart?.metric?.current ?? 0"
-    (change)="setMetric({ current: +$any($event.target).value })"
-  />
-</label>
-<label>
-  {{ T.F.TASK_GRAPH.ESTIMATE_MIN | translate }}
-  <input
-    type="number"
-    min="0"
-    [value]="task().timeEstimate / 60000"
-    (change)="setEstimateMinutes($any($event.target).value)"
-  />
-</label>
-<label>
-  {{ T.F.TASK_GRAPH.SMART_A_CONFIDENCE | translate }}
-  <input
-    type="number"
-    min="1"
-    max="5"
-    [value]="task().smart?.confidence ?? ''"
-    (change)="setSmart({ confidence: +$any($event.target).value || undefined })"
-  />
-</label>
-<label>
-  {{ T.F.TASK_GRAPH.SMART_R | translate }}
-  <input
-    [value]="task().smart?.relevance ?? ''"
-    (change)="setSmart({ relevance: $any($event.target).value })"
-  />
-</label>
-<label>
-  {{ T.F.TASK_GRAPH.SMART_T | translate }}
-  <input
-    type="date"
-    [value]="task().deadlineDay ?? ''"
-    (change)="setDeadline($any($event.target).value)"
-  />
-</label>
+<fieldset>
+  <legend>{{ T.F.TASK_GRAPH.SMART | translate }}</legend>
+  <label>
+    {{ T.F.TASK_GRAPH.SMART_S | translate }}
+    <textarea
+      name="specific"
+      rows="2"
+      autocomplete="off"
+      [value]="task().smart?.specific ?? ''"
+      (change)="setSmart({ specific: $any($event.target).value })"
+    ></textarea>
+  </label>
+  <div class="row3">
+    <label>
+      {{ T.F.TASK_GRAPH.SMART_M_UNIT | translate }}
+      <input
+        name="metricUnit"
+        autocomplete="off"
+        [value]="task().smart?.metric?.unit ?? ''"
+        (change)="setMetric({ unit: $any($event.target).value })"
+      />
+    </label>
+    <label>
+      {{ T.F.TASK_GRAPH.SMART_M_TARGET | translate }}
+      <input
+        type="number"
+        name="metricTarget"
+        inputmode="decimal"
+        autocomplete="off"
+        [value]="task().smart?.metric?.target ?? ''"
+        (change)="setMetric({ target: +$any($event.target).value })"
+      />
+    </label>
+    <label>
+      {{ T.F.TASK_GRAPH.SMART_M_CURRENT | translate }}
+      <input
+        type="number"
+        name="metricCurrent"
+        inputmode="decimal"
+        autocomplete="off"
+        [value]="task().smart?.metric?.current ?? ''"
+        (change)="setMetric({ current: +$any($event.target).value })"
+      />
+    </label>
+  </div>
+  <div class="row2">
+    <label>
+      {{ T.F.TASK_GRAPH.ESTIMATE_MIN | translate }}
+      <input
+        type="number"
+        name="estimate"
+        min="0"
+        inputmode="numeric"
+        autocomplete="off"
+        [value]="estimateMinutes()"
+        (change)="setEstimateMinutes($any($event.target).value)"
+      />
+    </label>
+    <label>
+      {{ T.F.TASK_GRAPH.SMART_A_CONFIDENCE | translate }}
+      <input
+        type="number"
+        name="confidence"
+        min="1"
+        max="5"
+        inputmode="numeric"
+        autocomplete="off"
+        [value]="task().smart?.confidence ?? ''"
+        (change)="setSmart({ confidence: +$any($event.target).value || undefined })"
+      />
+    </label>
+  </div>
+  <label>
+    {{ T.F.TASK_GRAPH.SMART_R | translate }}
+    <input
+      name="relevance"
+      autocomplete="off"
+      [value]="task().smart?.relevance ?? ''"
+      (change)="setSmart({ relevance: $any($event.target).value })"
+    />
+  </label>
+  <label>
+    {{ T.F.TASK_GRAPH.SMART_T | translate }}
+    <input
+      type="date"
+      name="deadline"
+      [value]="task().deadlineDay ?? ''"
+      (change)="setDeadline($any($event.target).value)"
+    />
+  </label>
+</fieldset>
 
 <label>
   {{ T.F.TASK_GRAPH.PLAN_DAY | translate }}
   <input
     type="date"
+    name="planDay"
     [value]="task().dueDay ?? ''"
     (change)="planForDay($any($event.target).value)"
   />
 </label>
 @if (isPlanDayWarning()) {
-  <p class="warn">{{ T.F.TASK_GRAPH.WARN_BEFORE_PREREQ | translate }}</p>
+  <p
+    class="warn"
+    role="status"
+  >
+    {{ T.F.TASK_GRAPH.WARN_BEFORE_PREREQ | translate }}
+  </p>
 }

@@ -1,10 +1,14 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 import {
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
+  afterNextRender,
   computed,
   inject,
   input,
   output,
+  viewChild,
 } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { TranslatePipe } from '@ngx-translate/core';
@@ -25,6 +29,11 @@ import {
   styleUrl: './task-graph-drawer.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [TranslatePipe],
+  host: {
+    role: 'complementary',
+    '[attr.aria-label]': 'task().title',
+    '(keydown.escape)': 'closed.emit()',
+  },
 })
 export class TaskGraphDrawerComponent {
   private _taskService = inject(TaskService);
@@ -47,11 +56,20 @@ export class TaskGraphDrawerComponent {
   readonly options = computed(() =>
     prerequisiteOptions(this.task(), this.projectTasks()),
   );
+  readonly estimateMinutes = computed(() => Math.round(this.task().timeEstimate / 60000));
   readonly isPlanDayWarning = computed(() => {
     const task = this.task();
     const byId = new Map(this.projectTasks().map((t) => [t.id, t]));
     return !!task.dueDay && isPlanDayBeforePrerequisite(task, task.dueDay, byId);
   });
+
+  private _statusSelect =
+    viewChild.required<ElementRef<HTMLSelectElement>>('statusSelect');
+
+  constructor() {
+    // move focus into the drawer when it opens so keyboard users land on the form
+    afterNextRender(() => this._statusSelect().nativeElement.focus());
+  }
 
   setStatus(status: TaskStatus): void {
     this._taskService.update(
