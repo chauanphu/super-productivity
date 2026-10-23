@@ -1,0 +1,19 @@
+# Production stack for planner.captechvn.com.
+# Copied to ~/e-web/super-productivity on 192.168.1.253 by .github/workflows/deploy-planner.yml.
+# No host ports are published: Nginx Proxy Manager reaches the container by name over nginx-network.
+services:
+  super-productivity:
+    image: ghcr.io/chauanphu/super-productivity:latest
+    container_name: super-productivity
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', '-o', '/dev/null', 'http://localhost:80/']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - nginx-network
+
+networks:
+  nginx-network:
+    external: true

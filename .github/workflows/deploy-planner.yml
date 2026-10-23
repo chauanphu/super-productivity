@@ -1,0 +1,124 @@
+name: Deploy planner.captechvn.com
+
+# Build on GitHub-hosted runners (the 192.168.1.253 host has too little RAM for the
+# Angular prod build), then deploy on a self-hosted runner that lives on that host.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-planner
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and push image to GHCR
+    if: github.repository == 'chauanphu/super-productivity'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Check out the repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Reconfigure git to use HTTP authentication
+        run: >
+          git config --global url."https://github.com/".insteadOf
+          ssh://git@github.com/
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf
+        with:
+          images: ghcr.io/chauanphu/super-productivity
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILDKIT_CONTEXT_KEEP_GIT_DIR=1
+            UNSPLASH_KEY=${{ secrets.UNSPLASH_KEY }}
+            UNSPLASH_CLIENT_ID=${{ secrets.UNSPLASH_CLIENT_ID }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to 192.168.1.253 (~/e-web/super-productivity)
+    needs: build
+    if: github.repository == 'chauanphu/super-productivity'
+    runs-on: [self-hosted, linux, sp-deploy]
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Log in to GitHub Container Registry
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Copy compose file and pull the new image
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/e-web/super-productivity"
+          cp deploy/planner/docker-compose.yml "$HOME/e-web/super-productivity/docker-compose.yml"
+          cd "$HOME/e-web/super-productivity"
+          docker compose pull
+
+      - name: Start the container
+        run: |
+          set -euo pipefail
+          cd "$HOME/e-web/super-productivity"
+          docker compose up -d --remove-orphans
+          docker image prune -f
+
+      - name: Wait for the container to become healthy
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' super-productivity)
+            if [ "$status" = "healthy" ]; then
+              echo "super-productivity is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "super-productivity did not become healthy (last status: $status)"
+          docker logs --tail 50 super-productivity
+          exit 1
