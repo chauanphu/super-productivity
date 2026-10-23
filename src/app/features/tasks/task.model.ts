@@ -41,6 +41,16 @@ export interface TaskReminderOption {
   label: string;
 }
 
+export type TaskStatus = 'todo' | 'doing' | 'done' | 'pending';
+
+export interface TaskSmart {
+  specific?: string;
+  metric?: { unit?: string; target: number; current: number };
+  /** 1-5 */
+  confidence?: number;
+  relevance?: string;
+}
+
 export interface TimeSpentOnDayCopy {
   [key: string]: number;
 }
@@ -129,6 +139,14 @@ export interface TaskCopy
 
   /** Reminder timestamp for the deadline. */
   deadlineRemindAt?: number | null;
+
+  /** Planning status; read via getEffectiveStatus(), which also respects isDone. */
+  status?: TaskStatus;
+  /** Condition for resuming (or why it stopped); only meaningful when status is 'pending'. */
+  pendingNote?: string;
+  /** Ids of tasks (same project) that must be done before this one. */
+  dependsOnIds?: string[];
+  smart?: TaskSmart;
   attachments: TaskAttachment[];
   reminderId?: string | null;
 
