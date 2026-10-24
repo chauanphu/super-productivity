@@ -1,5 +1,12 @@
 <div class="head">
-  <h3 [title]="task().title">{{ task().title }}</h3>
+  <input
+    class="name"
+    name="title"
+    autocomplete="off"
+    [attr.aria-label]="T.F.TASK_GRAPH.NAME | translate"
+    [value]="task().title"
+    (change)="rename($any($event.target).value)"
+  />
   <button
     type="button"
     (click)="closed.emit()"
@@ -7,7 +14,6 @@
     {{ T.F.TASK_GRAPH.CLOSE | translate }}
   </button>
 </div>
-<p class="score">{{ T.F.TASK_GRAPH.SMART | translate }} {{ score() }}/5</p>
 
 <label>
   {{ T.F.TASK_GRAPH.STATUS | translate }}
@@ -54,6 +60,42 @@
       </label>
     }
   </div>
+</fieldset>
+
+<fieldset>
+  <legend>{{ T.F.TASK_GRAPH.SUBTASKS | translate }}</legend>
+  @for (sub of subTasks(); track sub.id) {
+    <div class="subtask">
+      <input
+        type="checkbox"
+        [checked]="sub.isDone"
+        [attr.aria-label]="T.F.TASK_GRAPH.SUBTASK_DONE | translate"
+        (change)="toggleSubTask(sub)"
+      />
+      <input
+        name="subtask-{{ sub.id }}"
+        autocomplete="off"
+        [attr.aria-label]="T.F.TASK_GRAPH.NAME | translate"
+        [value]="sub.title"
+        (change)="renameSubTask(sub, $any($event.target).value)"
+      />
+      <button
+        type="button"
+        [attr.aria-label]="T.F.TASK_GRAPH.SUBTASK_DELETE | translate"
+        (click)="removeSubTask(sub)"
+      >
+        ✕
+      </button>
+    </div>
+  }
+  <input
+    #newSub
+    name="newSubTask"
+    autocomplete="off"
+    [attr.aria-label]="T.F.TASK_GRAPH.SUBTASK_ADD | translate"
+    [placeholder]="T.F.TASK_GRAPH.SUBTASK_ADD | translate"
+    (keydown.enter)="addSubTask(newSub)"
+  />
 </fieldset>
 
 <fieldset>

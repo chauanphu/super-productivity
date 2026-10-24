@@ -1,6 +1,6 @@
 import type { ElementDefinition } from 'cytoscape';
 import { Task, TaskStatus } from '../tasks/task.model';
-import { buildGraph, getEffectiveStatus, isBlocked, smartScore } from './task-graph.util';
+import { buildGraph, getEffectiveStatus, isBlocked } from './task-graph.util';
 
 const MAX_TITLE_LENGTH = 48;
 // status is also shown as a glyph so it never relies on colour alone
@@ -31,7 +31,7 @@ export const toCytoscapeElements = (
       return {
         data: {
           id: task.id,
-          label: `${STATUS_GLYPH[status]}${shortTitle(task.title)}\nSMART ${smartScore(task)}/5`,
+          label: `${STATUS_GLYPH[status]}${shortTitle(task.title)}`,
         },
         classes: classes.join(' '),
       };

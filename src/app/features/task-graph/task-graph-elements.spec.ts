@@ -41,12 +41,9 @@ describe('toCytoscapeElements', () => {
     expect(nodeById(els, 'b').classes).toContain('dim');
   });
 
-  it('shows the SMART score in the label', () => {
-    const els = toCytoscapeElements(
-      [t('a', { deadlineDay: '2026-11-01', smart: { specific: 'x' } })],
-      ALL,
-    );
-    expect(nodeById(els, 'a').data.label).toContain('SMART 2/5');
+  it('labels a node with its title only', () => {
+    const els = toCytoscapeElements([t('a')], ALL);
+    expect(nodeById(els, 'a').data.label).toBe('a');
   });
   it('truncates very long titles and marks status with a glyph', () => {
     const long = 'x'.repeat(80);

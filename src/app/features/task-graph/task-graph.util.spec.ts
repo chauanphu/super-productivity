@@ -4,7 +4,6 @@ import {
   getEffectiveStatus,
   isBlocked,
   latestPrerequisiteDay,
-  smartScore,
   wouldCreateCycle,
 } from './task-graph.util';
 
@@ -23,34 +22,6 @@ describe('task-graph.util', () => {
 
     it('does not show done when isDone was unset again', () => {
       expect(getEffectiveStatus(t('a', { status: 'done', isDone: false }))).toBe('todo');
-    });
-  });
-
-  describe('smartScore', () => {
-    it('is 0 for a bare task', () => {
-      expect(smartScore(t('a'))).toBe(0);
-    });
-
-    it('is 5 when every letter is filled', () => {
-      const full = t('a', {
-        timeEstimate: 60,
-        deadlineDay: '2026-11-01',
-        smart: {
-          specific: 'x',
-          metric: { target: 10, current: 0 },
-          confidence: 3,
-          relevance: 'goal',
-        },
-      });
-      expect(smartScore(full)).toBe(5);
-    });
-
-    it('needs both estimate and confidence for A, and target > 0 for M', () => {
-      expect(
-        smartScore(
-          t('a', { timeEstimate: 60, smart: { metric: { target: 0, current: 0 } } }),
-        ),
-      ).toBe(0);
     });
   });
 

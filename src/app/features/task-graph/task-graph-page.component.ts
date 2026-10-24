@@ -48,6 +48,8 @@ const buildStyle = (el: HTMLElement): cytoscape.StylesheetJson => {
   const muted = v('--text-color-muted', '#777');
   const card = v('--card-bg', '#fff');
   const primary = v('--palette-primary-500', '#1e88e5');
+  const success = v('--color-success', '#4caf50');
+  const info = '#2196f3'; // the app has no info token; blue = in progress
   const warning = v('--color-warning', '#ff9800');
 
   /* eslint-disable @typescript-eslint/naming-convention */
@@ -71,7 +73,7 @@ const buildStyle = (el: HTMLElement): cytoscape.StylesheetJson => {
         'border-color': muted,
       },
     },
-    { selector: 'node.ready', style: { 'border-width': 2, 'border-color': primary } },
+    { selector: 'node.ready', style: { 'border-width': 2, 'border-color': text } },
     {
       selector: 'node.blocked',
       style: { 'border-style': 'dashed', color: muted },
@@ -80,9 +82,9 @@ const buildStyle = (el: HTMLElement): cytoscape.StylesheetJson => {
       selector: 'node.doing',
       style: {
         'border-width': 2,
-        'border-color': primary,
-        'background-color': primary,
-        'background-opacity': 0.22,
+        'border-color': info,
+        'background-color': info,
+        'background-opacity': 0.2,
       },
     },
     {
@@ -94,7 +96,16 @@ const buildStyle = (el: HTMLElement): cytoscape.StylesheetJson => {
         'background-opacity': 0.14,
       },
     },
-    { selector: 'node.done', style: { color: muted } },
+    {
+      selector: 'node.done',
+      style: {
+        color: muted,
+        'border-width': 2,
+        'border-color': success,
+        'background-color': success,
+        'background-opacity': 0.14,
+      },
+    },
     { selector: 'node.hover', style: { 'border-width': 3 } },
     {
       selector: 'node:selected',

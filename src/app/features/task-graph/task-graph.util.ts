@@ -13,17 +13,6 @@ export const getEffectiveStatus = (task: Task): TaskStatus => {
   return !task.status || task.status === 'done' ? 'todo' : task.status;
 };
 
-export const smartScore = (task: Task): number => {
-  const s = task.smart;
-  return [
-    !!s?.specific?.trim(),
-    (s?.metric?.target ?? 0) > 0,
-    task.timeEstimate > 0 && !!s?.confidence,
-    !!s?.relevance?.trim(),
-    !!task.deadlineDay,
-  ].filter(Boolean).length;
-};
-
 const reaches = (adj: Map<string, string[]>, from: string, to: string): boolean => {
   const seen = new Set<string>();
   const stack = [from];

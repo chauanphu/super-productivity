@@ -11,12 +11,14 @@ import {
   viewChild,
 } from '@angular/core';
 import { Store } from '@ngrx/store';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { TranslatePipe } from '@ngx-translate/core';
 import { T } from '../../t.const';
 import { PlannerActions } from '../planner/store/planner.actions';
+import { selectAllTasks } from '../tasks/store/task.selectors';
 import { TaskService } from '../tasks/task.service';
 import { Task, TaskSmart, TaskStatus } from '../tasks/task.model';
-import { getEffectiveStatus, smartScore } from './task-graph.util';
+import { getEffectiveStatus } from './task-graph.util';
 import {
   isPlanDayBeforePrerequisite,
   prerequisiteOptions,
@@ -52,7 +54,12 @@ export class TaskGraphDrawerComponent {
   ];
 
   readonly status = computed(() => getEffectiveStatus(this.task()));
-  readonly score = computed(() => smartScore(this.task()));
+  private _allTasks = toSignal(this._store.select(selectAllTasks), { initialValue: [] });
+  readonly subTasks = computed(() =>
+    this.task()
+      .subTaskIds.map((id) => this._allTasks().find((t) => t.id === id))
+      .filter((t): t is Task => !!t),
+  );
   readonly options = computed(() =>
     prerequisiteOptions(this.task(), this.projectTasks()),
   );
@@ -69,6 +76,31 @@ export class TaskGraphDrawerComponent {
   constructor() {
     // move focus into the drawer when it opens so keyboard users land on the form
     afterNextRender(() => this._statusSelect().nativeElement.focus());
+  }
+
+  rename(title: string): void {
+    const trimmed = title.trim();
+    if (trimmed) this._taskService.update(this.task().id, { title: trimmed });
+  }
+
+  renameSubTask(sub: Task, title: string): void {
+    const trimmed = title.trim();
+    if (trimmed) this._taskService.update(sub.id, { title: trimmed });
+  }
+
+  toggleSubTask(sub: Task): void {
+    this._taskService.update(sub.id, { isDone: !sub.isDone });
+  }
+
+  addSubTask(field: HTMLInputElement): void {
+    const title = field.value.trim();
+    if (!title) return;
+    this._taskService.addSubTaskTo(this.task().id, { title });
+    field.value = '';
+  }
+
+  removeSubTask(sub: Task): void {
+    this._taskService.remove({ ...sub, subTasks: [] });
   }
 
   setStatus(status: TaskStatus): void {
