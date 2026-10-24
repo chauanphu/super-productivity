@@ -1704,7 +1704,6 @@
       "FIT": "Fit to screen",
       "GRAPH": "Task dependency graph",
       "LEGEND": "Dashed: waiting for prerequisites. Dark outline: ready to start. Blue: in progress. Green: done. Orange: pending.",
-      "NAME": "Task name",
       "NAV": "Graph",
       "NODE_LIST": "Tasks",
       "PENDING_NOTE": "Condition to resume",
@@ -1724,10 +1723,6 @@
       "STATUS_DONE": "Done",
       "STATUS_PENDING": "Pending",
       "STATUS_TODO": "Not started",
-      "SUBTASKS": "Subtasks",
-      "SUBTASK_ADD": "Add subtask (Enter)",
-      "SUBTASK_DELETE": "Delete subtask",
-      "SUBTASK_DONE": "Subtask done",
       "TITLE": "Task graph",
       "WARN_BEFORE_PREREQ": "This day is earlier than a prerequisite's planned day"
     },

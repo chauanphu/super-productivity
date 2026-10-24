@@ -11,22 +11,8 @@
   border-left: 1px solid var(--divider-color);
 }
 
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s);
-}
-
-.name {
-  flex: 1;
-  font-weight: 600;
-}
-
-.subtask {
-  display: flex;
-  align-items: center;
-  gap: var(--s-half);
+.close {
+  align-self: flex-end;
 }
 
 label {
