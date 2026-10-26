@@ -331,6 +331,26 @@ describe('OperationLogStoreService', () => {
     });
   });
 
+  describe('hasRejectedOpOfType', () => {
+    it('is true only for a rejected op of the given action type', async () => {
+      const merge = createTestOperation({
+        actionType: ActionType.SYNC_APPLY_FIRST_SYNC_MERGE,
+      });
+      const other = createTestOperation();
+      await service.append(merge);
+      await service.append(other);
+      await service.markRejected([other.id]);
+      expect(
+        await service.hasRejectedOpOfType(ActionType.SYNC_APPLY_FIRST_SYNC_MERGE),
+      ).toBe(false);
+
+      await service.markRejected([merge.id]);
+      expect(
+        await service.hasRejectedOpOfType(ActionType.SYNC_APPLY_FIRST_SYNC_MERGE),
+      ).toBe(true);
+    });
+  });
+
   describe('deleteOpsWhere', () => {
     it('should delete operations matching predicate', async () => {
       const op1 = createTestOperation({ actionType: '[Task] Create' as ActionType });

@@ -13,6 +13,7 @@ import { OperationWriteFlushService } from '../../op-log/sync/operation-write-fl
 import { BackupService } from '../../op-log/backup/backup.service';
 import { SyncProviderId, SyncStatus } from '../../op-log/sync-providers/provider.const';
 import { SyncProviderManager } from '../../op-log/sync-providers/provider-manager.service';
+import { ActionType } from '../../op-log/core/action-types.enum';
 
 describe('AccountSessionService', () => {
   let service: AccountSessionService;
@@ -57,8 +58,10 @@ describe('AccountSessionService', () => {
       'getUnsynced',
       'loadFirstSyncMergePending',
       'hasSyncedOps',
+      'hasRejectedOpOfType',
     ]);
     store.hasSyncedOps.and.resolveTo(false);
+    store.hasRejectedOpOfType.and.resolveTo(false);
     manager = jasmine.createSpyObj('SyncProviderManager', [
       'getProviderConfig',
       'getLastSyncedProviderId',
@@ -146,6 +149,16 @@ describe('AccountSessionService', () => {
       expect(await service.logout()).toBe('DONE');
       expect(dialog.open).not.toHaveBeenCalled();
       expect(wipe.wipeAll).toHaveBeenCalled();
+    });
+
+    it('InSync but a first-sync merge op was rejected: asks (merged data may be lost)', async () => {
+      store.hasRejectedOpOfType.and.callFake(
+        async (t) => t === ActionType.SYNC_APPLY_FIRST_SYNC_MERGE,
+      );
+      dialogAnswers(false);
+      expect(await service.logout()).toBe('CANCELLED');
+      expect(dialog.open).toHaveBeenCalledTimes(1);
+      expect(wipe.wipeAll).not.toHaveBeenCalled();
     });
 
     it('sync failure with unsynced ops left: asks', async () => {

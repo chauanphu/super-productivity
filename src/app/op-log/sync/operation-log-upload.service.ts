@@ -11,7 +11,8 @@ import {
 } from '../core/operation.types';
 import { OpLog } from '../../core/log';
 import { LOCK_NAMES, MAX_OPS_PER_UPLOAD_REQUEST } from '../core/operation-log.const';
-import { chunkArray } from '../../util/chunk-array';
+import { chunkArrayKeepingRuns } from '../../util/chunk-array';
+import { ActionType } from '../core/action-types.enum';
 import {
   OperationSyncCapable,
   RestorePointType,
@@ -224,9 +225,17 @@ export class OperationLogUploadService {
         syncOps = await this.encryptionService.encryptOperations(syncOps, encryptKey);
       }
 
-      // Upload in batches to avoid 413 Payload Too Large errors
-      const chunks = chunkArray(syncOps, MAX_OPS_PER_UPLOAD_REQUEST);
-      const correspondingEntries = chunkArray(regularOps, MAX_OPS_PER_UPLOAD_REQUEST);
+      // Upload in batches to avoid 413 Payload Too Large errors.
+      // First-sync merge chunks reference each other (projects <-> tasks <-> tags), so
+      // they go up in one request: the server commits a request atomically, so other
+      // devices never download (and "repair") a half-uploaded merge.
+      const indexBatches = chunkArrayKeepingRuns(
+        regularOps.map((_, i) => i),
+        MAX_OPS_PER_UPLOAD_REQUEST,
+        (i) => regularOps[i].op.actionType === ActionType.SYNC_APPLY_FIRST_SYNC_MERGE,
+      );
+      const chunks = indexBatches.map((b) => b.map((i) => syncOps[i]));
+      const correspondingEntries = indexBatches.map((b) => b.map((i) => regularOps[i]));
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];

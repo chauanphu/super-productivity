@@ -26,6 +26,7 @@ import { LAST_SERVER_SEQ_KEY_PREFIX } from '../../op-log/sync-providers/super-sy
 import { SUPER_SYNC_DEFAULT_BASE_URL } from '../../op-log/sync-providers/super-sync/super-sync.model';
 import { FIRST_SYNC_MERGE_DONE_KEY_PREFIX } from '../../op-log/sync/first-sync-merge/first-sync-merge.service';
 import { Log } from '../log';
+import { ActionType } from '../../op-log/core/action-types.enum';
 
 export type AccountSessionResult = 'DONE' | 'CANCELLED';
 
@@ -100,10 +101,14 @@ export class AccountSessionService {
 
     await this._writeFlush.flushPendingWrites();
     const count = (await this._opLogStore.getUnsynced()).length;
+    // A rejected first-sync merge op never reached the server and is not "unsynced".
+    const hasRejectedMerge = await this._opLogStore.hasRejectedOpOfType(
+      ActionType.SYNC_APPLY_FIRST_SYNC_MERGE,
+    );
     // Only a known account whose server copy was just confirmed (InSync, nothing
-    // unsynced) is wiped without asking.
+    // unsynced, no rejected merge) is wiped without asking.
     const isConfirmNeeded =
-      count > 0 || isPreviousAccountUnknown || !isServerCopyVerified;
+      count > 0 || isPreviousAccountUnknown || !isServerCopyVerified || hasRejectedMerge;
     if (
       isConfirmNeeded &&
       !(await this._confirm(
@@ -114,6 +119,7 @@ export class AccountSessionService {
     ) {
       Log.log('[AccountSession] Wipe cancelled', {
         unsyncedCount: count,
+        hasRejectedMerge,
         isPreviousAccountUnknown,
         isServerCopyVerified,
       });

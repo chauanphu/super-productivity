@@ -1,6 +1,7 @@
 import { inject, Injectable } from '@angular/core';
 import { DBSchema, IDBPDatabase, openDB } from 'idb';
 import {
+  ActionType,
   Operation,
   OperationLogEntry,
   VectorClock,
@@ -760,6 +761,15 @@ export class OperationLogStoreService {
     this._unsyncedCacheLastSeq = currentLastSeq;
 
     return [...this._unsyncedCache];
+  }
+
+  /** True if any op of this action type was permanently rejected (getUnsynced() skips those). */
+  async hasRejectedOpOfType(actionType: ActionType): Promise<boolean> {
+    await this._ensureInit();
+    const all = await this.db.getAll(STORE_NAMES.OPS);
+    return all.some(
+      (e) => !!e.rejectedAt && decodeStoredEntry(e).op.actionType === actionType,
+    );
   }
 
   /**
