@@ -168,10 +168,17 @@ GET /api/sync/status
 
 ## Client Configuration
 
-In Super Productivity, configure the Custom Sync provider with:
+The login page asks only for email and password; the server is fixed per build:
 
-- **Base URL**: `https://sync.your-domain.com` (or your deployed URL)
-- **Auth Token**: JWT token from login
+- The client uses `superSyncBaseUrl` from `src/environments/environment*.ts`, or, if it is
+  empty, the origin that serves the app (`http:`/`https:` pages only). No external host is
+  ever used as a fallback; without either, the login page shows "Server not configured".
+- Simplest deployment: one reverse proxy that serves the built Angular app at `/` and this
+  server under `/api` on the same origin. No CORS setup needed.
+- If the app and the server are on different origins, set `superSyncBaseUrl` and configure
+  CORS on the server to allow the app's origin.
+- Electron and Android builds have no usable origin (`file://`, `https://localhost`), so
+  they must set `superSyncBaseUrl`.
 
 ## Maintenance
 
