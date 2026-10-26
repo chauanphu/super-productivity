@@ -21,7 +21,7 @@ import {
 } from '../../../../electron/shared-with-frontend/get-backup-timestamp';
 import { T } from '../../t.const';
 import { SyncProviderManager } from '../../op-log/sync-providers/provider-manager.service';
-import { SyncProviderId } from '../../op-log/sync-providers/provider.const';
+import { SyncProviderId, SyncStatus } from '../../op-log/sync-providers/provider.const';
 import { LAST_SERVER_SEQ_KEY_PREFIX } from '../../op-log/sync-providers/super-sync/super-sync';
 import { SUPER_SYNC_DEFAULT_BASE_URL } from '../../op-log/sync-providers/super-sync/super-sync.model';
 import { FIRST_SYNC_MERGE_DONE_KEY_PREFIX } from '../../op-log/sync/first-sync-merge/first-sync-merge.service';
@@ -54,8 +54,9 @@ export class AccountSessionService {
   }
 
   async completeLogin(s: AuthSession): Promise<AccountSessionResult> {
-    if (await this._isAccountChange(s)) {
-      return this._flushConfirmWipe(s);
+    const change = await this._accountChange(s);
+    if (change !== 'SAME') {
+      return this._flushConfirmWipe(s, change === 'UNKNOWN');
     }
     // Same account or none: keep local data; the first sync runs the first-sync merge
     // if needed. Background upload/WS stay gated until that sync, so start it now.
@@ -66,11 +67,13 @@ export class AccountSessionService {
 
   private async _flushConfirmWipe(
     nextSession?: AuthSession,
+    isPreviousAccountUnknown = false,
   ): Promise<AccountSessionResult> {
     // A pending merge is checked before syncing: sync() would resume it.
+    let isServerCopyVerified = false;
     if ((await this._opLogStore.loadFirstSyncMergePending()) === null && isOnline()) {
       try {
-        await this._syncWrapper.sync();
+        isServerCopyVerified = (await this._syncWrapper.sync()) === SyncStatus.InSync;
       } catch (e) {
         Log.warn('[AccountSession] Sync before wipe failed');
       }
@@ -97,32 +100,43 @@ export class AccountSessionService {
 
     await this._writeFlush.flushPendingWrites();
     const count = (await this._opLogStore.getUnsynced()).length;
+    // Only a known account whose server copy was just confirmed (InSync, nothing
+    // unsynced) is wiped without asking.
+    const isConfirmNeeded =
+      count > 0 || isPreviousAccountUnknown || !isServerCopyVerified;
     if (
-      count > 0 &&
+      isConfirmNeeded &&
       !(await this._confirm(
-        T.F.SYNC.ACCOUNT.D_UNSYNCED_MSG,
+        count > 0 ? T.F.SYNC.ACCOUNT.D_UNSYNCED_MSG : T.F.SYNC.ACCOUNT.D_UNVERIFIED_MSG,
         () => this._backup.loadCompleteBackup(true),
         { count },
       ))
     ) {
-      Log.log('[AccountSession] Wipe cancelled', { unsyncedCount: count });
+      Log.log('[AccountSession] Wipe cancelled', {
+        unsyncedCount: count,
+        isPreviousAccountUnknown,
+        isServerCopyVerified,
+      });
       return 'CANCELLED';
     }
     await this._wipe.wipeAll({ nextSession });
     return 'DONE';
   }
 
-  /** Account identity is (baseUrl, userId); an unknown previous account counts as a change. */
-  private async _isAccountChange(s: AuthSession): Promise<boolean> {
+  /** Account identity is (baseUrl, userId). */
+  private async _accountChange(s: AuthSession): Promise<'SAME' | 'CHANGED' | 'UNKNOWN'> {
     const cfg = await this._providerManager.getProviderConfig(SyncProviderId.SuperSync);
     // A token without baseUrl predates per-server config and used the default server.
     const storedBaseUrl =
       cfg?.baseUrl || (cfg?.accessToken ? SUPER_SYNC_DEFAULT_BASE_URL : undefined);
     if (storedBaseUrl && normalizeUrl(storedBaseUrl) !== normalizeUrl(s.baseUrl)) {
-      return true;
+      return 'CHANGED';
     }
     const previous = await this._previousUserId(cfg);
-    return previous === 'UNKNOWN' || (previous !== null && previous !== s.userId);
+    if (previous === 'UNKNOWN') {
+      return 'UNKNOWN';
+    }
+    return previous !== null && previous !== s.userId ? 'CHANGED' : 'SAME';
   }
 
   /**

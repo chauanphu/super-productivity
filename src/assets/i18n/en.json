@@ -1350,6 +1350,7 @@
         "BTN_DOWNLOAD_BACKUP": "Download backup",
         "D_PENDING_MERGE_MSG": "The first-time merge of this device's data into your account has not finished. Continuing deletes all data on this device, including the data that was not merged yet. Download a backup first if you want to keep it.",
         "D_TITLE": "Delete local data?",
+        "D_UNVERIFIED_MSG": "It could not be confirmed that the data on this device is stored on the server (offline, sync failed or the previous account is unknown). Deleting local data may lose it. Download a backup first if you want to keep it.",
         "D_UNSYNCED_MSG": "{{count}} change(s) on this device have not been synced and will be lost when the local data is deleted. Download a backup first if you want to keep them.",
         "LOG_IN": "Log in",
         "LOG_OUT": "Log out",

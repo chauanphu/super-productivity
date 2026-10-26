@@ -86,31 +86,42 @@ export class LocalDataWipeService {
         setLocalDataWipeInProgress(false);
         throw e;
       }
-      const keys = Array.from({ length: localStorage.length }, (_, i) =>
-        localStorage.key(i),
-      ).filter(
-        (k): k is string =>
-          !!k &&
-          (WIPED_KEYS.includes(k) || WIPED_KEY_PREFIXES.some((p) => k.startsWith(p))),
-      );
-      keys.forEach((k) => localStorage.removeItem(k));
-      // the emptied store must not make startup offer a backup restore of the old data
-      localStorage.setItem(SKIP_BACKUP_PROMPT_ONCE_KEY, '1');
-      // Whole private cfg incl. encryptKey: it belongs to the previous account.
-      const superSync = await this._providerManager.getProviderById(
-        SyncProviderId.SuperSync,
-      );
-      await superSync?.privateCfg.clear();
+      // SUP_OPS is gone: whatever happens next, end with the reload so the wipe flag
+      // cannot stay set in a running session (it drops every edit).
+      let removedKeys = 0;
+      try {
+        const keys = Array.from({ length: localStorage.length }, (_, i) =>
+          localStorage.key(i),
+        ).filter(
+          (k): k is string =>
+            !!k &&
+            (WIPED_KEYS.includes(k) || WIPED_KEY_PREFIXES.some((p) => k.startsWith(p))),
+        );
+        keys.forEach((k) => localStorage.removeItem(k));
+        removedKeys = keys.length;
+        // the emptied store must not make startup offer a backup restore of the old data
+        localStorage.setItem(SKIP_BACKUP_PROMPT_ONCE_KEY, '1');
+        // Whole private cfg incl. encryptKey: it belongs to the previous account.
+        const superSync = await this._providerManager.getProviderById(
+          SyncProviderId.SuperSync,
+        );
+        await superSync?.privateCfg.clear();
 
-      if (opts.nextSession) {
-        await this._auth.commitSession(opts.nextSession);
-        await this._writeFlush.flushPendingWrites();
+        if (opts.nextSession) {
+          await this._auth.commitSession(opts.nextSession);
+          await this._writeFlush.flushPendingWrites();
+        }
+      } catch (e) {
+        OpLog.err('[LocalDataWipe] Step after clearing local data failed', {
+          removedKeys,
+          errorName: e instanceof Error ? e.name : typeof e,
+        });
+        throw e;
+      } finally {
+        OpLog.normal('[LocalDataWipe] Local data wiped, reloading', { removedKeys });
+        setLocalDataWipeReloading();
+        this._reload();
       }
-      OpLog.normal('[LocalDataWipe] Local data wiped, reloading', {
-        removedKeys: keys.length,
-      });
-      setLocalDataWipeReloading();
-      this._reload();
     });
   }
 

@@ -520,6 +520,11 @@ export const SYNC_FORM: ConfigFormSection<SyncConfig> = {
                 description: T.F.SYNC.FORM.SUPER_SYNC.SERVER_URL_DESCRIPTION,
                 placeholder: SUPER_SYNC_DEFAULT_BASE_URL,
               },
+              expressions: {
+                // The server belongs to the signed-in account; change it by logging in.
+                'props.disabled': (field: FormlyFieldConfig) =>
+                  !!field?.model?.accessToken,
+              },
             },
           ],
         },

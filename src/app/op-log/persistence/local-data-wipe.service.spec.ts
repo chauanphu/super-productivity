@@ -174,6 +174,23 @@ describe('LocalDataWipeService', () => {
     expect(reload).not.toHaveBeenCalled();
   });
 
+  it('still reloads when a step after the clear throws, and surfaces the error', async () => {
+    privateCfgClear.and.rejectWith(new Error('idb'));
+    await expectAsync(service.wipeAll()).toBeRejectedWithError('idb');
+    expect(store.clearAllUserData).toHaveBeenCalled();
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('still reloads when committing the next session throws', async () => {
+    auth.commitSession.and.rejectWith(new Error('commit'));
+    await expectAsync(
+      service.wipeAll({
+        nextSession: { token: 't', userId: 2, email: 'e', baseUrl: 'u' },
+      }),
+    ).toBeRejected();
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
   it('skips the legacy database when it does not exist', async () => {
     legacy.databaseExists.and.resolveTo(false);
     await service.wipeAll();

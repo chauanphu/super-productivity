@@ -119,8 +119,30 @@ describe('AccountSessionService', () => {
       expect(wipe.wipeAll).toHaveBeenCalled();
     });
 
-    it('offline without unsynced ops: wipes without asking', async () => {
+    it('offline without unsynced ops: still asks (server copy unverified), cancel keeps data', async () => {
       online.and.returnValue(false);
+      dialogAnswers(false);
+      expect(await service.logout()).toBe('CANCELLED');
+      expect(dialog.open).toHaveBeenCalledTimes(1);
+      expect(wipe.wipeAll).not.toHaveBeenCalled();
+    });
+
+    it('offline without unsynced ops: confirm wipes', async () => {
+      online.and.returnValue(false);
+      dialogAnswers(true);
+      expect(await service.logout()).toBe('DONE');
+      expect(wipe.wipeAll).toHaveBeenCalled();
+    });
+
+    it('sync not InSync without unsynced ops: asks', async () => {
+      syncWrapper.sync.and.resolveTo('HANDLED_ERROR');
+      dialogAnswers(false);
+      expect(await service.logout()).toBe('CANCELLED');
+      expect(dialog.open).toHaveBeenCalledTimes(1);
+      expect(wipe.wipeAll).not.toHaveBeenCalled();
+    });
+
+    it('sync InSync and nothing unsynced: wipes without a dialog', async () => {
       expect(await service.logout()).toBe('DONE');
       expect(dialog.open).not.toHaveBeenCalled();
       expect(wipe.wipeAll).toHaveBeenCalled();
@@ -268,6 +290,17 @@ describe('AccountSessionService', () => {
       it('seq key > 0 means an unknown previous account: confirm + wipe', async () => {
         localStorage.setItem(SEQ_KEY, '42');
         await expectSwitchPath();
+      });
+
+      it('unknown account with nothing unsynced still asks; cancel keeps data', async () => {
+        localStorage.setItem(SEQ_KEY, '42');
+        online.and.returnValue(true);
+        unsynced(0);
+        dialogAnswers(false);
+        expect(await service.completeLogin(next)).toBe('CANCELLED');
+        expect(dialog.open).toHaveBeenCalledTimes(1);
+        expect(wipe.wipeAll).not.toHaveBeenCalled();
+        expect(auth.commitSession).not.toHaveBeenCalled();
       });
 
       it('a seq key of 0 is no evidence: keeps data', async () => {
