@@ -190,7 +190,7 @@ node dist/scripts/set-password.js user@example.com 'a-long-password'
 SET_PASSWORD_PASSWORD='a-long-password' node dist/scripts/set-password.js user@example.com
 # Reset a compromised password AND log out every existing session (bumps tokenVersion;
 # without the flag existing tokens stay valid):
-node dist/scripts/set-password.js --revoke-sessions user@example.com
+SET_PASSWORD_PASSWORD='a-new-password' node dist/scripts/set-password.js --revoke-sessions user@example.com
 
 # Delete a user account
 npm run delete-user -- user@example.com
@@ -307,7 +307,7 @@ For single-instance deployments, these limitations do not apply. The current imp
 
 ## Known Limitations
 
-- **First-sync merge and server snapshots**: the client's first-login merge of local data into an existing account is uploaded as `applyFirstSyncMerge` operations. Server-side snapshot generation (restore points, `GET /api/sync/snapshot`) does not replay these operations, so data that only arrived through such a merge is missing from server-built snapshots. Clients replaying the operation log are not affected.
+- **First-sync merge and server snapshots**: the client's first-login merge of local data into an existing account is uploaded as `applyFirstSyncMerge` operations. Server-side snapshot generation (restore points, `GET /api/sync/snapshot`) does not replay these operations, so data that only arrived through such a merge is missing from server-built snapshots.
 
 ## Security Notes
 
