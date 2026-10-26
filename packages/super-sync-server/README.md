@@ -97,25 +97,35 @@ upstream origin is not allowed.
 
 ## Deploying at planner.captechvn.com behind nginx-proxy-manager
 
-One container serves both the Angular app and the API on the same origin, plus Postgres.
-No external services. Files: `docker-compose.planner.yml` and `.env.planner.example` at the
-repo root; the image is the `planner` target of `packages/super-sync-server/Dockerfile`
-(it builds the app with `npm run buildFrontend:prodWeb`, copies `dist/browser` to `/app/web`
-and sets `WEB_ROOT=/app/web`; the default target is still the server-only image).
+One container (`planner-app`) serves both the Angular app and the API on the same origin, next
+to Postgres (`planner-db`). No external services. The image is the `planner` target of
+`packages/super-sync-server/Dockerfile` (it builds the app with `npm run buildFrontend:prodWeb`,
+copies `dist/browser` to `/app/web` and sets `WEB_ROOT=/app/web`; the default target is still
+the server-only image). For a self-built setup on another host, `docker-compose.planner.yml`
+and `.env.planner.example` at the repo root do the same with `--build`.
 
-### 1. Configure and start
+### Production layout (192.168.1.253)
 
-```bash
-cp .env.planner.example .env.planner
-# Fill in POSTGRES_PASSWORD (openssl rand -hex 24) and JWT_SECRET (openssl rand -hex 32).
-# Keep REGISTRATION_DISABLED=true and CORS_ORIGINS=https://planner.captechvn.com.
-docker compose -f docker-compose.planner.yml --env-file .env.planner up -d --build
-```
+- **CI**: `.github/workflows/deploy-planner.yml` builds `ghcr.io/chauanphu/planner`
+  (`latest` + `sha-…` tags) on GitHub-hosted runners on every push to `master` (or a manual
+  dispatch); the host is too small to build the Angular app. A self-hosted runner on the host
+  (labels `self-hosted, linux, sp-deploy`) then copies
+  `deploy/planner-stack/docker-compose.yml` to `~/e-web/planner/docker-compose.yml` (the
+  previous one is kept as `docker-compose.yml.bak-*`, last 3), runs
+  `docker compose pull planner-app && docker compose up -d --remove-orphans` and waits for the
+  container healthcheck.
+- **Secrets** live only in `~/e-web/planner/.env` on the host, created by hand and never
+  written by CI (the deploy fails if it is missing). Keys: `POSTGRES_USER`, `POSTGRES_DB`,
+  `POSTGRES_PASSWORD` (`openssl rand -hex 24`), `JWT_SECRET` (`openssl rand -hex 32`),
+  `PUBLIC_URL=https://planner.captechvn.com`, `CORS_ORIGINS=https://planner.captechvn.com`,
+  `REGISTRATION_DISABLED=true`, `ALLOWED_EMAILS`.
+- **Network**: no host ports are published. `planner-app` joins the external `nginx-network`,
+  and the NPM Proxy Host forwards to `planner-app` : `1900`.
 
 The app container (`scripts/docker-start.sh`) runs `prisma migrate deploy` and then the server
 on port 1900. `prisma/migrations` has no initial migration, so on an empty database the script
-first creates the schema with `prisma db push` and marks the existing migrations as applied. The compose
-file publishes it on `127.0.0.1:${APP_PORT:-1900}` only.
+first creates the schema with `prisma db push` and marks the existing migrations as applied.
+Migrations run automatically on every deploy; `backup.sh` (below) covers the rollback path.
 
 **Never expose port 1900 to the internet directly.** The server trusts exactly one proxy hop
 (`trustProxy: 1`, fixed in `src/server.ts`; there is no env var): it takes the client IP from
@@ -124,24 +134,36 @@ in front. A client reaching the port directly could put any IP into `X-Forwarded
 dodge per-IP rate limits, and it would bypass TLS. If you add another proxy hop (e.g. a CDN in
 front of NPM), the value has to change.
 
-### 2. Create the first user
+### First deploy prerequisites
 
-Self-registration is closed (`REGISTRATION_DISABLED=true`), so the operator creates accounts:
+- `~/e-web/planner/.env` exists on the host (see above) and the `nginx-network` Docker network
+  exists (NPM's network).
+- GHCR: the first push creates the `planner` package as **private**, owned by `chauanphu`. The
+  deploy job pulls it with the workflow's `GITHUB_TOKEN`, so in the package settings
+  (github.com → Packages → planner → Package settings → Manage Actions access) make sure the
+  `super-productivity` repository has at least **read** access (it normally gets **admin**
+  automatically because its workflow created the package). Keep the package private.
+
+### Create the first user
+
+Self-registration is closed (`REGISTRATION_DISABLED=true`), so the operator creates accounts.
+Pass the password through stdin so it stays out of `ps` and shell history (6 chars to 72 bytes):
 
 ```bash
-docker compose -f docker-compose.planner.yml --env-file .env.planner exec \
-  -e SET_PASSWORD_PASSWORD='a-long-password' app node dist/scripts/set-password.js user@example.com
+cd ~/e-web/planner
+read -rs SET_PASSWORD_PASSWORD && export SET_PASSWORD_PASSWORD
+# `-e NAME` without a value copies it from this shell, so it never appears on a command line
+docker compose exec -T -e SET_PASSWORD_PASSWORD planner-app \
+  node dist/scripts/set-password.js user@example.com
+unset SET_PASSWORD_PASSWORD
 ```
 
 The same command resets a password (add `--revoke-sessions` to log out all devices).
 
-### 3. nginx-proxy-manager Proxy Host
+### nginx-proxy-manager Proxy Host
 
-- **Details**: Domain Names `planner.captechvn.com`; Scheme `http`; Forward Hostname/IP and
-  Port: if NPM runs on the host network, `127.0.0.1` and `1900` (`APP_PORT`). If NPM runs in
-  Docker (usual), `127.0.0.1` is NPM's own container: attach NPM to this project's network
-  (`docker network connect <project>_default <npm-container>`) and forward to `app` : `1900`;
-  then the `ports:` mapping can be removed entirely.
+- **Details**: Domain Names `planner.captechvn.com`; Scheme `http`; Forward Hostname/IP
+  `planner-app`, Port `1900` (NPM reaches it over `nginx-network`).
 - Enable **Websockets Support** (the client keeps a websocket at `/api/sync/ws` for live sync
   notifications) and **Block Common Exploits**. Cache Assets: off (the server sends the right
   `Cache-Control` headers itself).
@@ -159,28 +181,29 @@ The same command resets a password (add `--revoke-sessions` to log out all devic
   proxy_send_timeout 90s;
   ```
 
-### 4. Backup and restore
+Until the Proxy Host is switched to `planner-app`, NPM still forwards to the old static
+`super-productivity` container, which CI leaves running. After the switch, remove it by hand:
+`cd ~/e-web/super-productivity && docker compose down`, then delete that directory.
 
-```bash
-docker compose -f docker-compose.planner.yml --env-file .env.planner exec -T db \
-  pg_dump -U planner -d planner -Fc > planner-$(date +%F).dump
-# restore into an empty database:
-docker compose -f docker-compose.planner.yml --env-file .env.planner exec -T db \
-  pg_restore -U planner -d planner --clean --if-exists < planner-YYYY-MM-DD.dump
+### Backup and restore
+
+`deploy/planner-stack/backup.sh` is a copy of `~/e-web/planner/backup.sh`, installed by hand
+with this crontab entry (CI never touches either):
+
+```cron
+15 3 * * * /home/aphuc/e-web/planner/backup.sh >> /home/aphuc/e-web/planner/backups/backup.log 2>&1
 ```
 
-(Use your `POSTGRES_USER`/`POSTGRES_DB` if you changed them.)
-
-### 5. Upgrade
+It writes `backups/planner-YYYY-MM-DD.sql.gz` (`pg_dump --clean --if-exists`) and keeps 14
+days. Restore:
 
 ```bash
-docker compose -f docker-compose.planner.yml --env-file .env.planner exec -T db \
-  pg_dump -U planner -d planner -Fc > planner-before-upgrade.dump
-git pull
-docker compose -f docker-compose.planner.yml --env-file .env.planner up -d --build
+cd ~/e-web/planner
+gunzip -c backups/planner-YYYY-MM-DD.sql.gz | docker exec -i planner-db psql -U planner planner
 ```
 
-Migrations run automatically when the app container starts.
+(Use your `POSTGRES_USER`/`POSTGRES_DB` if they are not `planner`.) Run `./backup.sh` by hand
+before a risky deploy.
 
 ### Desktop (Electron) and Android builds
 
