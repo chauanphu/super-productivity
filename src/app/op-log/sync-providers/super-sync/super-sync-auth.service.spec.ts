@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import {
   InvalidCredentialsError,
   LoginNetworkError,
+  LoginServerError,
   SuperSyncAuthService,
 } from './super-sync-auth.service';
 import { SyncProviderManager } from '../provider-manager.service';
@@ -66,6 +67,39 @@ describe('SuperSyncAuthService', () => {
     );
   });
 
+  it('login throws LoginServerError with status for 429 and 500', async () => {
+    for (const status of [429, 500]) {
+      fetchSpy.and.resolveTo(new Response('{}', { status }));
+      const err = await service.login('https://x.io', 'a@b.c', 'pw').catch((e) => e);
+      expect(err).toBeInstanceOf(LoginServerError);
+      expect((err as LoginServerError).status).toBe(status);
+    }
+  });
+
+  it('login throws LoginServerError for malformed 200 bodies', async () => {
+    for (const body of ['not json', '{}', '{"token":"t","user":{"id":1}}']) {
+      fetchSpy.and.resolveTo(new Response(body, { status: 200 }));
+      await expectAsync(
+        service.login('https://x.io', 'a@b.c', 'pw'),
+      ).toBeRejectedWithError(LoginServerError);
+    }
+  });
+
+  it('commitSession does not carry over stale refreshToken/expiresAt', async () => {
+    manager.getProviderConfig.and.resolveTo({
+      accessToken: 'old',
+      refreshToken: 'r',
+      expiresAt: 1,
+    });
+    await service.commitSession({ token: 'n', userId: 1, email: 'a@b.c', baseUrl: 'u' });
+    const saved = manager.setProviderConfig.calls.mostRecent().args[1] as {
+      refreshToken?: string;
+      expiresAt?: number;
+    };
+    expect(saved.refreshToken).toBeUndefined();
+    expect(saved.expiresAt).toBeUndefined();
+  });
+
   it('commitSession merges private cfg and enables SuperSync', async () => {
     manager.getProviderConfig.and.resolveTo({
       accessToken: 'old',
@@ -81,6 +115,8 @@ describe('SuperSyncAuthService', () => {
       accessToken: 'new',
       isEncryptionEnabled: true,
       baseUrl: 'https://x.io',
+      refreshToken: undefined,
+      expiresAt: undefined,
     });
     expect(cfg.updateSection).toHaveBeenCalledWith('sync', {
       isEnabled: true,

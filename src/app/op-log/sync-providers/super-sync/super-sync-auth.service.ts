@@ -18,6 +18,13 @@ export class LoginNetworkError extends Error {
   override name = 'LoginNetworkError';
 }
 
+export class LoginServerError extends Error {
+  override name = 'LoginServerError';
+  constructor(readonly status: number) {
+    super(`Login failed with status ${status}`);
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class SuperSyncAuthService {
   private _manager = inject(SyncProviderManager);
@@ -42,18 +49,19 @@ export class SuperSyncAuthService {
       throw new InvalidCredentialsError('Invalid credentials');
     }
     if (!res.ok) {
-      throw new LoginNetworkError(`Login failed with status ${res.status}`);
+      throw new LoginServerError(res.status);
     }
-    const body = (await res.json()) as {
-      token: string;
-      user: { id: number; email: string };
-    };
-    return {
-      token: body.token,
-      userId: body.user.id,
-      email: body.user.email,
-      baseUrl: base,
-    };
+    let body: { token?: string; user?: { id?: number; email?: string } };
+    try {
+      body = await res.json();
+    } catch {
+      throw new LoginServerError(res.status);
+    }
+    const { token, user } = body ?? {};
+    if (!token || typeof user?.id !== 'number' || !user.email) {
+      throw new LoginServerError(res.status);
+    }
+    return { token, userId: user.id, email: user.email, baseUrl: base };
   }
 
   async commitSession(s: AuthSession): Promise<void> {
@@ -63,6 +71,8 @@ export class SuperSyncAuthService {
       ...existing,
       baseUrl: s.baseUrl,
       accessToken: s.token,
+      refreshToken: undefined,
+      expiresAt: undefined,
     });
     this._globalConfig.updateSection('sync', {
       isEnabled: true,
