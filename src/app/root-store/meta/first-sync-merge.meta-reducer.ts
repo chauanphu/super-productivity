@@ -109,8 +109,17 @@ export const firstSyncMergeMetaReducer: MetaReducer = (
 
     const cfg = s[CONFIG_FEATURE_NAME] as GlobalConfigState | undefined;
     if (payload.globalConfig && cfg) {
+      // per section, so sections/fields missing in an older payload keep current values;
       // the sync section is per device (provider, enabled, encryption)
-      s = { ...s, [CONFIG_FEATURE_NAME]: { ...payload.globalConfig, sync: cfg.sync } };
+      const merged: Record<string, unknown> = { ...cfg };
+      for (const [k, v] of Object.entries(payload.globalConfig)) {
+        const c = (cfg as unknown as Record<string, unknown>)[k];
+        merged[k] =
+          v && c && typeof v === 'object' && typeof c === 'object' && !Array.isArray(v)
+            ? { ...c, ...v }
+            : v;
+      }
+      s = { ...s, [CONFIG_FEATURE_NAME]: { ...merged, sync: cfg.sync } };
     }
 
     return reducer(s, action);

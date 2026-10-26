@@ -238,8 +238,10 @@ export const buildMergePayload = (
   for (const tag of [...values(remote.tag), ...localOnlyTags]) {
     if (tag.id === TODAY_TAG.id) continue;
     const taskIds = reconcile(tag.taskIds, (t) => t.tagIds.includes(tag.id));
-    if (!remoteTags[tag.id] || !sameIds(taskIds, tag.taskIds)) {
-      tags.push({ ...tag, taskIds });
+    const next = { ...tag, taskIds };
+    // only local-only tags or remote tags that actually change (avoid overwriting remote edits)
+    if (stableJson(next) !== stableJson(remoteTags[tag.id])) {
+      tags.push(next);
     }
   }
 

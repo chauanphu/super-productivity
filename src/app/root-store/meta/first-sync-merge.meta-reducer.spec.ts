@@ -136,6 +136,27 @@ describe('firstSyncMergeMetaReducer', () => {
     expect(r[CONFIG_FEATURE_NAME].sync).toEqual(localSync);
   });
 
+  it('merges globalConfig per section onto the current config', () => {
+    const state = createState();
+    const cur = state[CONFIG_FEATURE_NAME];
+    state[CONFIG_FEATURE_NAME] = {
+      ...cur,
+      tasks: { ...cur.tasks, notesTemplate: 'local tpl' },
+    };
+    // older client config: a section missing and a field missing from another
+    const tasks: Record<string, unknown> = { ...cur.tasks, isAutoMarkParentAsDone: true };
+    delete tasks.notesTemplate;
+    const incoming: Record<string, unknown> = { ...cur, tasks };
+    delete incoming.focusMode;
+    const r = apply(state, {
+      ...emptyPayload(),
+      globalConfig: incoming as unknown as GlobalConfigState,
+    });
+    expect(r[CONFIG_FEATURE_NAME].tasks.isAutoMarkParentAsDone).toBe(true);
+    expect(r[CONFIG_FEATURE_NAME].tasks.notesTemplate).toBe('local tpl');
+    expect(r[CONFIG_FEATURE_NAME].focusMode).toEqual(cur.focusMode);
+  });
+
   it('leaves config alone when globalConfig is null', () => {
     const state = createState();
     const r = apply(state, emptyPayload());

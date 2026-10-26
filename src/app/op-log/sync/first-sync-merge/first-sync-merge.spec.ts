@@ -268,6 +268,13 @@ describe('first-sync-merge', () => {
     expect(byId(p.tags, 'S')?.taskIds).toEqual(['x', 't']);
   });
 
+  it('does not emit a remote tag that is identical after reconcile', () => {
+    const shared = tag('R', { title: 'same', taskIds: ['x'] });
+    const local = data({ tags: [shared], tasks: [task('x', { tagIds: ['R'] })] });
+    const remote = data({ tags: [shared], tasks: [task('x', { tagIds: ['R'] })] });
+    expect(buildMergePayload(local, remote, {}).tags).toEqual([]);
+  });
+
   it('never puts TODAY into tagIds and never emits the TODAY tag', () => {
     const local = data({
       tags: [tag(TODAY_TAG.id, { taskIds: ['t'] })],

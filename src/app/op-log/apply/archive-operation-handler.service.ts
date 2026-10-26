@@ -24,6 +24,7 @@ import { OpType } from '../core/operation.types';
 import { confirmDialog } from '../../util/native-dialogs';
 import { applyFirstSyncMerge } from '../../root-store/meta/first-sync-merge.actions';
 import { taskAdapter } from '../../features/tasks/store/task.reducer';
+import type { FirstSyncMergePayload } from '../sync/first-sync-merge/first-sync-merge';
 
 /**
  * Creates an empty ArchiveModel with default values.
@@ -448,14 +449,28 @@ export class ArchiveOperationHandler {
   }
 
   /**
-   * Upserts the merge payload's archiveTasks into archiveYoung (by ID, idempotent).
-   * Tasks already in archiveOld are skipped so no task lives in both archives.
+   * Remote replay of a first-sync merge chunk: writes its archiveTasks.
    *
-   * @localBehavior Executes - nothing writes the archive before dispatch
+   * @localBehavior SKIP - the caller awaits writeFirstSyncMergeArchive() before dispatch
    * @remoteBehavior Executes - Uses ArchiveDbAdapter for direct IndexedDB access
    */
   private async _handleFirstSyncMerge(action: PersistentAction): Promise<void> {
-    const { archiveTasks } = (action as ReturnType<typeof applyFirstSyncMerge>).payload;
+    if (!action.meta?.isRemote) {
+      return; // Local: already written by the caller before dispatch
+    }
+    await this.writeFirstSyncMergeArchive(
+      (action as ReturnType<typeof applyFirstSyncMerge>).payload,
+    );
+  }
+
+  /**
+   * Upserts archiveTasks into archiveYoung (by ID, idempotent). Tasks already in
+   * archiveOld are skipped so no task lives in both archives. Errors propagate.
+   * Call this BEFORE dispatching applyFirstSyncMerge on the originating device.
+   */
+  async writeFirstSyncMergeArchive({
+    archiveTasks,
+  }: Pick<FirstSyncMergePayload, 'archiveTasks'>): Promise<void> {
     if (!archiveTasks.length) return;
     const archiveOld = await this._archiveDbAdapter.loadArchiveOld();
     const toWrite = archiveTasks.filter((t) => !archiveOld?.task.entities[t.id]);
