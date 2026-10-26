@@ -20,6 +20,7 @@ import {
   getBackupTimestamp,
 } from '../../../../electron/shared-with-frontend/get-backup-timestamp';
 import { T } from '../../t.const';
+import { FIRST_SYNC_MERGE_DONE_KEY_PREFIX } from '../../op-log/sync/first-sync-merge/first-sync-merge.service';
 import { Log } from '../log';
 
 export type AccountSessionResult = 'DONE' | 'CANCELLED';
@@ -46,8 +47,8 @@ export class AccountSessionService {
   }
 
   async completeLogin(s: AuthSession): Promise<AccountSessionResult> {
-    const current = await this._auth.getSession();
-    if (current && current.userId !== s.userId) {
+    const previous = await this._previousUserId();
+    if (previous !== null && previous !== s.userId) {
       return this._flushConfirmWipe(s);
     }
     // Same account or none: keep local data; the first sync runs the first-sync merge
@@ -103,6 +104,33 @@ export class AccountSessionService {
     }
     await this._wipe.wipeAll({ nextSession });
     return 'DONE';
+  }
+
+  /**
+   * The account this device's data belongs to. Without a session (e.g. the token was
+   * cleared after repeated 401s) the pending merge marker and done markers still tell.
+   */
+  private async _previousUserId(): Promise<number | null> {
+    const session = await this._auth.getSession();
+    if (session) {
+      return session.userId;
+    }
+    const pending = (await this._opLogStore.loadFirstSyncMergePending()) as {
+      userId?: unknown;
+    } | null;
+    if (typeof pending?.userId === 'number') {
+      return pending.userId;
+    }
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(FIRST_SYNC_MERGE_DONE_KEY_PREFIX)) {
+        const id = parseInt(key.slice(FIRST_SYNC_MERGE_DONE_KEY_PREFIX.length), 10);
+        if (!isNaN(id)) {
+          return id;
+        }
+      }
+    }
+    return null;
   }
 
   /** Loops until the user deletes (true) or cancels (false); 'EXTRA' downloads a backup. */

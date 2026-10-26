@@ -414,7 +414,12 @@ export class DialogSyncCfgComponent implements AfterViewInit {
 
   async logout(): Promise<void> {
     // 'DONE' reloads the app; 'CANCELLED' keeps everything as it is.
-    await this._accountSession.logout();
+    try {
+      await this._accountSession.logout();
+    } catch (e) {
+      SyncLog.err('Logout failed', e);
+      this._snackService.open({ type: 'ERROR', msg: T.F.SYNC.ACCOUNT.S_LOGOUT_FAILED });
+    }
   }
 
   goToLogin(): void {

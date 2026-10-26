@@ -111,8 +111,8 @@ describe('LocalDataWipeService', () => {
     expect(calls).toEqual([
       'blocked',
       'flush',
-      'clearAllUserData',
       'legacyClearAll',
+      'clearAllUserData',
       'privateCfgClear',
       'reload',
     ]);
@@ -149,6 +149,7 @@ describe('LocalDataWipeService', () => {
   it('does not reload when the legacy database still has data after clearing', async () => {
     legacy.hasUsableEntityData.and.resolveTo(true);
     await expectAsync(service.wipeAll()).toBeRejected();
+    expect(store.clearAllUserData).not.toHaveBeenCalled();
     expect(reload).not.toHaveBeenCalled();
   });
 

@@ -201,6 +201,38 @@ describe('AccountSessionService', () => {
       expect(auth.commitSession).not.toHaveBeenCalled();
     });
 
+    it('no session but the device belongs to another account (done key): wipes', async () => {
+      auth.getSession.and.resolveTo(null);
+      localStorage.setItem('SUP_FIRST_SYNC_MERGE_DONE_1', '1');
+      try {
+        expect(await service.completeLogin(next)).toBe('DONE');
+      } finally {
+        localStorage.removeItem('SUP_FIRST_SYNC_MERGE_DONE_1');
+      }
+      expect(wipe.wipeAll).toHaveBeenCalledWith({ nextSession: next });
+      expect(auth.commitSession).not.toHaveBeenCalled();
+    });
+
+    it('no session, done key of the same account: keeps data', async () => {
+      auth.getSession.and.resolveTo(null);
+      localStorage.setItem('SUP_FIRST_SYNC_MERGE_DONE_2', '1');
+      try {
+        expect(await service.completeLogin(next)).toBe('DONE');
+      } finally {
+        localStorage.removeItem('SUP_FIRST_SYNC_MERGE_DONE_2');
+      }
+      expect(wipe.wipeAll).not.toHaveBeenCalled();
+      expect(auth.commitSession).toHaveBeenCalledWith(next);
+    });
+
+    it('no session but a pending merge of another account: switch path', async () => {
+      auth.getSession.and.resolveTo(null);
+      store.loadFirstSyncMergePending.and.resolveTo({ userId: 1, local: {} });
+      dialogAnswers(false);
+      expect(await service.completeLogin(next)).toBe('CANCELLED');
+      expect(auth.commitSession).not.toHaveBeenCalled();
+    });
+
     it('different userId + cancel: keeps data and does not commit', async () => {
       online.and.returnValue(false);
       unsynced(1);

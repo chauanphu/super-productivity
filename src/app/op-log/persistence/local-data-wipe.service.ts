@@ -66,16 +66,17 @@ export class LocalDataWipeService {
     // Syncs stay blocked until the reload: the store in memory is the old account's.
     await this._syncWrapper.runWithSyncBlocked(async () => {
       await this._writeFlush.flushPendingWrites();
-      await this._lockService.request(LOCK_NAMES.OPERATION_LOG, () =>
-        this._opLogStore.clearAllUserData(),
-      );
       // An empty SUP_OPS would otherwise re-migrate legacy 'pf' data (and credentials).
+      // First: it is the step that can refuse, before anything in SUP_OPS is gone.
       if (await this._legacyPfDb.databaseExists()) {
         await this._legacyPfDb.clearAll();
         if (await this._legacyPfDb.hasUsableEntityData()) {
           throw new Error('Failed to clear legacy database');
         }
       }
+      await this._lockService.request(LOCK_NAMES.OPERATION_LOG, () =>
+        this._opLogStore.clearAllUserData(),
+      );
       const keys = Array.from({ length: localStorage.length }, (_, i) =>
         localStorage.key(i),
       ).filter(
