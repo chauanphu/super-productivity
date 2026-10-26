@@ -129,7 +129,7 @@ jobs:
         run: |
           set -euo pipefail
           status=unknown
-          for _ in $(seq 1 45); do
+          for _ in $(seq 1 90); do
             status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' planner-app || echo missing)
             if [ "$status" = "healthy" ]; then
               echo "planner-app is healthy"
@@ -137,6 +137,6 @@ jobs:
             fi
             sleep 2
           done
-          echo "::error::planner-app did not become healthy within 90s (last status: $status)"
+          echo "::error::planner-app did not become healthy within 180s (last status: $status)"
           docker logs --tail 80 planner-app 2>&1 || true
           exit 1
