@@ -1,0 +1,40 @@
+<h1 mat-dialog-title>{{ T.F.SYNC.D_PROJECT_MERGE_CONFLICT.TITLE | translate }}</h1>
+
+<mat-dialog-content>
+  <p>{{ T.F.SYNC.D_PROJECT_MERGE_CONFLICT.MSG | translate }}</p>
+  <table>
+    @for (c of data.conflicts; track c.projectId) {
+      <tr>
+        <td>
+          <strong>{{ c.title }}</strong>
+        </td>
+        <td>
+          <mat-radio-group
+            [attr.aria-label]="c.title"
+            [value]="choices()[c.projectId]"
+            (change)="setChoice(c.projectId, $event.value)"
+          >
+            <mat-radio-button value="LOCAL">
+              {{ T.F.SYNC.D_PROJECT_MERGE_CONFLICT.KEEP_LOCAL | translate }}
+            </mat-radio-button>
+            <mat-radio-button value="REMOTE">
+              {{ T.F.SYNC.D_PROJECT_MERGE_CONFLICT.KEEP_REMOTE | translate }}
+            </mat-radio-button>
+          </mat-radio-group>
+        </td>
+      </tr>
+    }
+  </table>
+</mat-dialog-content>
+
+<mat-dialog-actions align="end">
+  <button
+    class="confirm-btn"
+    mat-flat-button
+    color="primary"
+    [disabled]="!isComplete()"
+    (click)="confirm()"
+  >
+    {{ T.F.SYNC.D_PROJECT_MERGE_CONFLICT.BTN_CONFIRM | translate }}
+  </button>
+</mat-dialog-actions>

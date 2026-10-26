@@ -1434,6 +1434,20 @@ describe('OperationLogStoreService', () => {
       expect(backup).toBeNull();
     });
 
+    it('should keep the first-sync merge pending record separate from the import backup', async () => {
+      const pending = { userId: 1, downloaded: false };
+      await service.saveFirstSyncMergePending(pending);
+      expect(await service.hasImportBackup()).toBe(false);
+      expect(await service.loadFirstSyncMergePending()).toEqual(pending);
+
+      await service.saveImportBackup({ other: true });
+      await service.clearImportBackup();
+      expect(await service.loadFirstSyncMergePending()).toEqual(pending);
+
+      await service.clearFirstSyncMergePending();
+      expect(await service.loadFirstSyncMergePending()).toBeNull();
+    });
+
     it('should check if backup exists with hasImportBackup', async () => {
       expect(await service.hasImportBackup()).toBe(false);
 

@@ -1143,6 +1143,13 @@
         "TEXT": "<p>Your file permission for local syncing has been revoked.</p>",
         "TITLE": "Sync: Local file permission denied"
       },
+      "D_PROJECT_MERGE_CONFLICT": {
+        "BTN_CONFIRM": "Apply",
+        "KEEP_LOCAL": "Keep this device's version",
+        "KEEP_REMOTE": "Keep server version",
+        "MSG": "These projects exist on this device and on the server with different content. Choose which version to keep for each project.",
+        "TITLE": "Merge Projects"
+      },
       "D_RESTORE": {
         "BTN_RESTORE": "Restore",
         "CONFIRM_MSG": "Are you absolutely sure you want to restore to <strong>{{timestamp}}</strong>?<br><br>This will <strong>completely replace</strong> all your current data and <strong>cannot be undone</strong>.",
@@ -1382,6 +1389,7 @@
         "WARN_CLIENT_ID_REGENERATED": "Sync device ID was invalid and has been regenerated. A sync conflict may occur on next sync.",
         "ERROR_UNABLE_TO_READ_REMOTE_DATA": "Error while syncing. Unable to read remote data. Maybe you enabled encryption and your local password does not match the one used to encrypt the remote data?",
         "FINISH_DAY_SYNC_ERROR": "Sync error while finishing day. Please try again.",
+        "FIRST_SYNC_MERGE_E2E_MISMATCH": "Cannot merge this device's data: end-to-end encryption is enabled on only one side (this device or the server). Merging is not supported in this case.",
         "FRESH_CLIENT_SYNC_CANCELLED": "Initial sync cancelled. Remote data was not applied.",
         "HYDRATION_FAILED": "Failed to load data. Please reload the app.",
         "IMPORTING": "Importing data",

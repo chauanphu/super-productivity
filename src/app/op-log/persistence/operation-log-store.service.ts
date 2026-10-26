@@ -21,6 +21,7 @@ import {
   STORE_NAMES,
   SINGLETON_KEY,
   BACKUP_KEY,
+  FIRST_SYNC_MERGE_PENDING_KEY,
   OPS_INDEXES,
   ArchiveStoreEntry,
   ProfileDataStoreEntry,
@@ -1247,6 +1248,33 @@ export class OperationLogStoreService {
   async clearImportBackup(): Promise<void> {
     await this._ensureInit();
     await this.db.delete(STORE_NAMES.IMPORT_BACKUP, SINGLETON_KEY);
+  }
+
+  /**
+   * Pending first-sync merge record (FirstSyncMergeService). Lives in import_backup under
+   * its own id so it can hold a multi-MB local snapshot and survives restarts.
+   */
+  async saveFirstSyncMergePending(state: unknown): Promise<void> {
+    await this._ensureInit();
+    await this.db.put(STORE_NAMES.IMPORT_BACKUP, {
+      id: FIRST_SYNC_MERGE_PENDING_KEY,
+      state,
+      savedAt: Date.now(),
+    });
+  }
+
+  async loadFirstSyncMergePending(): Promise<unknown | null> {
+    await this._ensureInit();
+    const entry = await this.db.get(
+      STORE_NAMES.IMPORT_BACKUP,
+      FIRST_SYNC_MERGE_PENDING_KEY,
+    );
+    return entry ? entry.state : null;
+  }
+
+  async clearFirstSyncMergePending(): Promise<void> {
+    await this._ensureInit();
+    await this.db.delete(STORE_NAMES.IMPORT_BACKUP, FIRST_SYNC_MERGE_PENDING_KEY);
   }
 
   /**

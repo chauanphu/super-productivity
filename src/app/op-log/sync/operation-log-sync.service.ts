@@ -154,6 +154,11 @@ export class OperationLogSyncService {
    *
    * @returns true if user has created any tasks, projects (besides INBOX), tags (besides system tags), or notes
    */
+  /** Public entry for the SuperSync first-sync merge trigger. */
+  hasMeaningfulLocalData(): boolean {
+    return this._hasMeaningfulLocalData();
+  }
+
   private _hasMeaningfulLocalData(): boolean {
     const snapshot = this.stateSnapshotService.getStateSnapshot();
 

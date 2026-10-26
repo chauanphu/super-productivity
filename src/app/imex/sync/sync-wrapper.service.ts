@@ -75,6 +75,7 @@ import { OperationLogStoreService } from '../../op-log/persistence/operation-log
 import { OperationLogSyncService } from '../../op-log/sync/operation-log-sync.service';
 import { WrappedProviderService } from '../../op-log/sync-providers/wrapped-provider.service';
 import { SuperSyncProvider } from '../../op-log/sync-providers/super-sync/super-sync';
+import { FirstSyncMergeService } from '../../op-log/sync/first-sync-merge/first-sync-merge.service';
 
 @Injectable({
   providedIn: 'root',
@@ -95,6 +96,7 @@ export class SyncWrapperService {
   private _opLogStore = inject(OperationLogStoreService);
   private _opLogSyncService = inject(OperationLogSyncService);
   private _wrappedProvider = inject(WrappedProviderService);
+  private _firstSyncMerge = inject(FirstSyncMergeService);
 
   syncState$ = this._providerManager.syncStatus$;
 
@@ -385,6 +387,18 @@ export class SyncWrapperService {
       if (!syncCapableProvider) {
         SyncLog.warn('SyncWrapperService: Provider does not support operation sync');
         return SyncStatus.InSync;
+      }
+
+      // SuperSync first login of a device with data: merge it into the account by ID
+      // (or resume a merge interrupted by a crash), then continue with the normal sync.
+      // Runs inside sync()'s in-progress guard, so it cannot run twice concurrently.
+      if (providerId === SyncProviderId.SuperSync) {
+        const mergeResult = await this._firstSyncMerge.runIfNeeded(syncCapableProvider);
+        if (mergeResult === 'CANCELLED') {
+          this._snackService.open({ msg: T.F.SYNC.S.LOCAL_DATA_REPLACE_CANCELLED });
+          this._providerManager.setSyncStatus('UNKNOWN_OR_CHANGED');
+          return 'HANDLED_ERROR';
+        }
       }
 
       // Perform actual sync: download first, then upload
