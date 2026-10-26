@@ -206,6 +206,7 @@ export class FirstSyncMergeService {
     if (probe !== 'OK') {
       return probe;
     }
+    this._downloadedThisSession = false; // a new merge never reuses an earlier download
     const pending: FirstSyncMergePending = {
       userId,
       local: await this._readStore(),
@@ -253,6 +254,7 @@ export class FirstSyncMergeService {
       ? planFirstSyncResume(this._downloadedThisSession)
       : { redownload: true, foldLocalEdits: false };
     if (plan.redownload) {
+      this._downloadedThisSession = false;
       const seq = pending.opLogSeqAtStart;
       // Remote ops logged by an earlier (interrupted or previous-session) download
       // would be skipped as "already applied" after the reset below.
@@ -297,6 +299,8 @@ export class FirstSyncMergeService {
 
     const chunks = splitFirstSyncMergePayload(payload);
     const before = await this._countMergeOps();
+    // from here the store is no longer pure remote: any resume must download again
+    this._downloadedThisSession = false;
     for (const chunk of chunks) {
       this._store.dispatch(applyFirstSyncMerge({ payload: chunk }));
     }

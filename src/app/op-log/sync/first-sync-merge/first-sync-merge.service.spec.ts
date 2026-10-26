@@ -559,6 +559,36 @@ describe('FirstSyncMergeService', () => {
       expect(deletePredicate!(entry('local', 99))).toBeFalse();
     });
 
+    it('a later merge whose download fails re-downloads on resume (flag reset per run)', async () => {
+      // first merge in this session downloads successfully
+      expect(await service.run(provider, USER_ID)).toBe('MERGED');
+      // second merge (e.g. another account) fails during the download
+      storeState = data([project('pLocal2')]);
+      opLogSync.forceDownloadRemoteState.and.rejectWith(new Error('network'));
+      await expectAsync(service.run(provider, USER_ID)).toBeRejected();
+      // resume in the same session must download again, not read the restored store
+      opLogSync.forceDownloadRemoteState.and.callFake(async () => {
+        calls.push('forceDownload');
+        storeState = remoteState;
+      });
+      dispatched = [];
+      expect(await service.runIfNeeded(provider)).toBe('MERGED');
+      expect(opLogSync.forceDownloadRemoteState).toHaveBeenCalledTimes(3);
+      expect(allDispatched().projects.map((p) => p.id)).toEqual(['pLocal2']);
+    });
+
+    it('ops-persist shortfall: resume re-downloads instead of reading the merged store', async () => {
+      persistOps = false;
+      await expectAsync(service.runIfNeeded(provider)).toBeRejected();
+      persistOps = true;
+      // the store now holds remote + dispatched merge chunks
+      storeState = data([project('pLocal')], [task('t1', { projectId: 'pLocal' })]);
+      expect(await service.runIfNeeded(provider)).toBe('MERGED');
+      expect(opLogSync.forceDownloadRemoteState).toHaveBeenCalledTimes(2);
+      expect(allDispatched().projects.map((p) => p.id)).toEqual(['pLocal']);
+      expect(allDispatched().tasks.map((t) => t.id)).toEqual(['t1']);
+    });
+
     it('download failure restores the local snapshot and keeps the marker', async () => {
       const local = pendingRecord({ downloaded: false }).local;
       pendingInDb = pendingRecord({ downloaded: false, local });
