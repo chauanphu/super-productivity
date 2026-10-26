@@ -44,10 +44,15 @@ describe('setPassword', () => {
     );
   });
 
-  it('rejects passwords shorter than 10 chars', async () => {
-    await expect(setPassword('a@b.co', 'short')).rejects.toThrow();
+  it('rejects passwords shorter than 6 chars', async () => {
+    await expect(setPassword('a@b.co', '12345')).rejects.toThrow(/at least 6/);
     expect(user.create).not.toHaveBeenCalled();
     expect(user.update).not.toHaveBeenCalled();
+  });
+
+  it('accepts a 6-char password (minimum boundary)', async () => {
+    user.findUnique.mockResolvedValue(null);
+    await expect(setPassword('a@b.co', '123456')).resolves.toEqual({ created: true });
   });
 
   it('rejects passwords over 72 bytes (bcrypt would truncate silently)', async () => {

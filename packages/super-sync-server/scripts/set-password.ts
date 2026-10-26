@@ -2,7 +2,7 @@ import { prisma, disconnectDb } from '../src/db';
 import { Logger } from '../src/logger';
 import { hashPassword } from '../src/password';
 
-const MIN_PASSWORD_LENGTH = 10;
+const MIN_PASSWORD_LENGTH = 6;
 // bcrypt ignores everything after 72 bytes.
 const MAX_PASSWORD_BYTES = 72;
 const USAGE =
