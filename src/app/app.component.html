@@ -9,7 +9,7 @@
   ></div>
 }
 <!--TODO move inside page container somehow -->
-@if (layoutService.isShowAddTaskBar()) {
+@if (layoutService.isShowAddTaskBar() && !isLoginRoute()) {
   <add-task-bar
     (closed)="layoutService.hideAddTaskBar()"
     (done)="layoutService.hideAddTaskBar()"
@@ -18,7 +18,7 @@
     class="global"
   ></add-task-bar>
 }
-@if (layoutService.isShowAddTaskBar()) {
+@if (layoutService.isShowAddTaskBar() && !isLoginRoute()) {
   <div
     (click)="layoutService.hideAddTaskBar()"
     @fade
@@ -37,21 +37,21 @@
     [class.app-entrance]="isAppEntrance()"
     [dir]="isRTL ? 'rtl' : 'ltr'"
   >
-    <magic-side-nav
-      #magicSideNav
-      [activeWorkContextId]="getActiveWorkContextId()"
-    >
-    </magic-side-nav>
+    @if (!isLoginRoute()) {
+      <magic-side-nav [activeWorkContextId]="getActiveWorkContextId()"> </magic-side-nav>
+    }
 
     <main class="main-content">
-      <header
-        [class.isNotScrolled]="!layoutService.isWorkViewScrolled()"
-        class="header-wrapper"
-      >
-        <main-header></main-header>
+      @if (!isLoginRoute()) {
+        <header
+          [class.isNotScrolled]="!layoutService.isWorkViewScrolled()"
+          class="header-wrapper"
+        >
+          <main-header></main-header>
 
-        <banner></banner>
-      </header>
+          <banner></banner>
+        </header>
+      }
 
       <right-panel>
         <div
@@ -62,27 +62,29 @@
           <router-outlet #o="outlet"></router-outlet>
         </div>
       </right-panel>
-      <global-progress-bar></global-progress-bar>
+      @if (!isLoginRoute()) {
+        <global-progress-bar></global-progress-bar>
+      }
     </main>
 
     <!-- Mobile Bottom Navigation -->
-    @if (isShowMobileButtonNav()) {
+    @if (isShowMobileButtonNav() && !isLoginRoute()) {
       <mobile-bottom-nav
         [isEntrance]="isAppEntrance()"
-        (toggleMobileNavEvent)="magicSideNav.toggleMobileNav()"
+        (toggleMobileNavEvent)="magicSideNav()?.toggleMobileNav()"
       ></mobile-bottom-nav>
     }
   </div>
 }
 <!-- -->
 
-@if (isShowOnboardingPresets()) {
+@if (isShowOnboardingPresets() && !isLoginRoute()) {
   <onboarding-preset-selection
     (presetSelected)="onPresetSelected()"
   ></onboarding-preset-selection>
 }
 
-@if (onboardingHintService.currentStep()) {
+@if (onboardingHintService.currentStep() && !isLoginRoute()) {
   <onboarding-hint></onboarding-hint>
 }
 

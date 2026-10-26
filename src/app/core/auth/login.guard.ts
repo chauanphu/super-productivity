@@ -18,3 +18,5 @@ export class LoginGuard {
     return (await this._auth.getSession()) ? true : this._router.parseUrl('/login');
   }
 }
+
+export const isLoginUrl = (url: string): boolean => /^\/login(?:[?#]|$)/.test(url);

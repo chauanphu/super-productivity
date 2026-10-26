@@ -41,6 +41,13 @@ describe('POST /api/login/password', () => {
     expect(res.json()).toEqual({ error: 'Invalid credentials' });
   });
 
+  it('padded/mixed-case email is normalised, not rejected with 400', async () => {
+    findUnique.mockResolvedValue(null);
+    const res = await post({ email: ' User1@Example.com ', password: 'x' });
+    expect(res.statusCode).toBe(401);
+    expect(findUnique.mock.calls[0][0].where.email).toBe('user1@example.com');
+  });
+
   it('400 on a malformed body', async () => {
     expect((await post({ email: 'nope' })).statusCode).toBe(400);
   });

@@ -72,7 +72,7 @@ const MagicLinkRegisterSchema = z.object({
 });
 
 const LoginPasswordSchema = z.object({
-  email: z.string().email('Invalid email format'),
+  email: z.string().trim().toLowerCase().email('Invalid email format'),
   password: z.string().min(1).max(256),
 });
 
