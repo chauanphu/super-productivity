@@ -20,12 +20,18 @@ import {
   getBackupTimestamp,
 } from '../../../../electron/shared-with-frontend/get-backup-timestamp';
 import { T } from '../../t.const';
+import { SyncProviderManager } from '../../op-log/sync-providers/provider-manager.service';
+import { SyncProviderId } from '../../op-log/sync-providers/provider.const';
+import { LAST_SERVER_SEQ_KEY_PREFIX } from '../../op-log/sync-providers/super-sync/super-sync';
+import { SUPER_SYNC_DEFAULT_BASE_URL } from '../../op-log/sync-providers/super-sync/super-sync.model';
 import { FIRST_SYNC_MERGE_DONE_KEY_PREFIX } from '../../op-log/sync/first-sync-merge/first-sync-merge.service';
 import { Log } from '../log';
 
 export type AccountSessionResult = 'DONE' | 'CANCELLED';
 
 const READY_TIMEOUT_MS = 30_000;
+
+const normalizeUrl = (u: string): string => u.replace(/\/+$/, '');
 
 /**
  * Logout and account switch: push what is left (sync), then wipe local data.
@@ -41,14 +47,14 @@ export class AccountSessionService {
   private _syncWrapper = inject(SyncWrapperService);
   private _backup = inject(BackupService);
   private _matDialog = inject(MatDialog);
+  private _providerManager = inject(SyncProviderManager);
 
   logout(): Promise<AccountSessionResult> {
     return this._flushConfirmWipe();
   }
 
   async completeLogin(s: AuthSession): Promise<AccountSessionResult> {
-    const previous = await this._previousUserId();
-    if (previous !== null && previous !== s.userId) {
+    if (await this._isAccountChange(s)) {
       return this._flushConfirmWipe(s);
     }
     // Same account or none: keep local data; the first sync runs the first-sync merge
@@ -106,11 +112,27 @@ export class AccountSessionService {
     return 'DONE';
   }
 
+  /** Account identity is (baseUrl, userId); an unknown previous account counts as a change. */
+  private async _isAccountChange(s: AuthSession): Promise<boolean> {
+    const cfg = await this._providerManager.getProviderConfig(SyncProviderId.SuperSync);
+    // A token without baseUrl predates per-server config and used the default server.
+    const storedBaseUrl =
+      cfg?.baseUrl || (cfg?.accessToken ? SUPER_SYNC_DEFAULT_BASE_URL : undefined);
+    if (storedBaseUrl && normalizeUrl(storedBaseUrl) !== normalizeUrl(s.baseUrl)) {
+      return true;
+    }
+    const previous = await this._previousUserId(cfg);
+    return previous === 'UNKNOWN' || (previous !== null && previous !== s.userId);
+  }
+
   /**
-   * The account this device's data belongs to. Without a session (e.g. the token was
-   * cleared after repeated 401s) the pending merge marker and done markers still tell.
+   * The account this device's data belongs to. Without a session (the token is cleared
+   * after repeated 401s) the pending marker or a single done marker still tell; any
+   * other sign of earlier SuperSync use makes it 'UNKNOWN'. null = no SuperSync history.
    */
-  private async _previousUserId(): Promise<number | null> {
+  private async _previousUserId(
+    cfg: { encryptKey?: string; isEncryptionEnabled?: boolean } | null,
+  ): Promise<number | 'UNKNOWN' | null> {
     const session = await this._auth.getSession();
     if (session) {
       return session.userId;
@@ -121,14 +143,32 @@ export class AccountSessionService {
     if (typeof pending?.userId === 'number') {
       return pending.userId;
     }
+    const doneIds = new Set<number>();
+    let hasServerSeq = false;
     for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key?.startsWith(FIRST_SYNC_MERGE_DONE_KEY_PREFIX)) {
-        const id = parseInt(key.slice(FIRST_SYNC_MERGE_DONE_KEY_PREFIX.length), 10);
-        if (!isNaN(id)) {
-          return id;
-        }
+      const key = localStorage.key(i) ?? '';
+      if (key.startsWith(FIRST_SYNC_MERGE_DONE_KEY_PREFIX)) {
+        doneIds.add(parseInt(key.slice(FIRST_SYNC_MERGE_DONE_KEY_PREFIX.length), 10));
+      } else if (
+        key.startsWith(LAST_SERVER_SEQ_KEY_PREFIX) &&
+        parseInt(localStorage.getItem(key) ?? '0', 10) > 0
+      ) {
+        hasServerSeq = true;
       }
+    }
+    if (doneIds.size === 1) {
+      const [id] = doneIds;
+      return isNaN(id) ? 'UNKNOWN' : id;
+    }
+    if (
+      doneIds.size > 1 ||
+      hasServerSeq ||
+      !!cfg?.encryptKey ||
+      !!cfg?.isEncryptionEnabled ||
+      (this._providerManager.getLastSyncedProviderId() === SyncProviderId.SuperSync &&
+        (await this._opLogStore.hasSyncedOps()))
+    ) {
+      return 'UNKNOWN';
     }
     return null;
   }

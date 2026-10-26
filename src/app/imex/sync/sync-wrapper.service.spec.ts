@@ -36,6 +36,7 @@ import {
 import { MAX_LWW_REUPLOAD_RETRIES } from '../../op-log/core/operation-log.const';
 import { FirstSyncMergeService } from '../../op-log/sync/first-sync-merge/first-sync-merge.service';
 
+import { setLocalDataWipeInProgress } from '../../op-log/persistence/local-data-wipe-state';
 describe('SyncWrapperService', () => {
   let service: SyncWrapperService;
   let mockFirstSyncMerge: jasmine.SpyObj<FirstSyncMergeService>;
@@ -1519,6 +1520,17 @@ describe('SyncWrapperService', () => {
   });
 
   describe('sync() with encryption operation blocking', () => {
+    it('stays blocked while a local data wipe runs (until the reload)', async () => {
+      setLocalDataWipeInProgress(true);
+      try {
+        expect(await service.sync()).toBe('HANDLED_ERROR');
+        expect(service.isEncryptionOperationInProgress).toBe(true);
+        expect(mockSyncService.uploadPendingOps).not.toHaveBeenCalled();
+      } finally {
+        setLocalDataWipeInProgress(false);
+      }
+    });
+
     it('should return HANDLED_ERROR when encryption operation is in progress', async () => {
       // Manually set the flag (simulating runWithSyncBlocked is active)
       service['_isEncryptionOperationInProgress$'].next(true);

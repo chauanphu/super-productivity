@@ -8,6 +8,11 @@ import { OperationWriteFlushService } from '../sync/operation-write-flush.servic
 import { LockService } from '../sync/lock.service';
 import { SuperSyncAuthService } from '../sync-providers/super-sync/super-sync-auth.service';
 import { SyncProviderId } from '../sync-providers/provider.const';
+import {
+  isLocalDataWipeInProgress,
+  setLocalDataWipeInProgress,
+  SKIP_BACKUP_PROMPT_ONCE_KEY,
+} from './local-data-wipe-state';
 
 describe('LocalDataWipeService', () => {
   let service: LocalDataWipeService;
@@ -20,6 +25,7 @@ describe('LocalDataWipeService', () => {
   let privateCfgClear: jasmine.Spy;
   let reload: jasmine.Spy;
   const calls: string[] = [];
+  let wipeFlagAtClear: boolean | undefined;
 
   const WIPED_KEYS = [
     'super_sync_last_server_seq_abc',
@@ -42,7 +48,10 @@ describe('LocalDataWipeService', () => {
       'clearAllUserData',
     ]);
     store.loadFirstSyncMergePending.and.resolveTo(null);
-    store.clearAllUserData.and.callFake(track('clearAllUserData'));
+    store.clearAllUserData.and.callFake(async () => {
+      calls.push('clearAllUserData');
+      wipeFlagAtClear = isLocalDataWipeInProgress();
+    });
     legacy = jasmine.createSpyObj('LegacyPfDbService', [
       'databaseExists',
       'clearAll',
@@ -95,6 +104,16 @@ describe('LocalDataWipeService', () => {
 
   afterEach(() => {
     [...WIPED_KEYS, KEPT_KEY].forEach((k) => localStorage.removeItem(k));
+    localStorage.removeItem(SKIP_BACKUP_PROMPT_ONCE_KEY);
+    setLocalDataWipeInProgress(false);
+  });
+
+  it('marks the wipe in progress before clearing and arms the one-shot backup-prompt skip', async () => {
+    await service.wipeAll();
+    expect(wipeFlagAtClear).toBe(true);
+    // stays set: only the reload ends it
+    expect(isLocalDataWipeInProgress()).toBe(true);
+    expect(localStorage.getItem(SKIP_BACKUP_PROMPT_ONCE_KEY)).toBe('1');
   });
 
   it('clears every store, credential and marker key, then reloads', async () => {
@@ -150,6 +169,8 @@ describe('LocalDataWipeService', () => {
     legacy.hasUsableEntityData.and.resolveTo(true);
     await expectAsync(service.wipeAll()).toBeRejected();
     expect(store.clearAllUserData).not.toHaveBeenCalled();
+    expect(isLocalDataWipeInProgress()).toBe(false);
+    expect(localStorage.getItem(SKIP_BACKUP_PROMPT_ONCE_KEY)).toBeNull();
     expect(reload).not.toHaveBeenCalled();
   });
 

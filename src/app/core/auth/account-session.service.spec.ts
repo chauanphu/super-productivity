@@ -11,7 +11,8 @@ import { SyncWrapperService } from '../../imex/sync/sync-wrapper.service';
 import { OperationLogStoreService } from '../../op-log/persistence/operation-log-store.service';
 import { OperationWriteFlushService } from '../../op-log/sync/operation-write-flush.service';
 import { BackupService } from '../../op-log/backup/backup.service';
-import { SyncStatus } from '../../op-log/sync-providers/provider.const';
+import { SyncProviderId, SyncStatus } from '../../op-log/sync-providers/provider.const';
+import { SyncProviderManager } from '../../op-log/sync-providers/provider-manager.service';
 
 describe('AccountSessionService', () => {
   let service: AccountSessionService;
@@ -22,6 +23,7 @@ describe('AccountSessionService', () => {
   };
   let store: jasmine.SpyObj<OperationLogStoreService>;
   let dialog: jasmine.SpyObj<MatDialog>;
+  let manager: jasmine.SpyObj<SyncProviderManager>;
   let online: jasmine.Spy;
   const calls: string[] = [];
   const next: AuthSession = { token: 't2', userId: 2, email: 'b@c.d', baseUrl: 'u' };
@@ -54,7 +56,15 @@ describe('AccountSessionService', () => {
     store = jasmine.createSpyObj('OperationLogStoreService', [
       'getUnsynced',
       'loadFirstSyncMergePending',
+      'hasSyncedOps',
     ]);
+    store.hasSyncedOps.and.resolveTo(false);
+    manager = jasmine.createSpyObj('SyncProviderManager', [
+      'getProviderConfig',
+      'getLastSyncedProviderId',
+    ]);
+    manager.getProviderConfig.and.resolveTo(null);
+    manager.getLastSyncedProviderId.and.returnValue(null);
     store.loadFirstSyncMergePending.and.resolveTo(null);
     unsynced(0);
     dialog = jasmine.createSpyObj('MatDialog', ['open']);
@@ -77,6 +87,7 @@ describe('AccountSessionService', () => {
           useValue: { loadCompleteBackup: () => Promise.resolve({}) },
         },
         { provide: MatDialog, useValue: dialog },
+        { provide: SyncProviderManager, useValue: manager },
       ],
     });
     service = TestBed.inject(AccountSessionService);
@@ -231,6 +242,82 @@ describe('AccountSessionService', () => {
       dialogAnswers(false);
       expect(await service.completeLogin(next)).toBe('CANCELLED');
       expect(auth.commitSession).not.toHaveBeenCalled();
+    });
+
+    describe('no session and no known previous userId', () => {
+      const SEQ_KEY = 'super_sync_last_server_seq_testhash';
+      beforeEach(() => {
+        auth.getSession.and.resolveTo(null);
+        online.and.returnValue(false);
+        unsynced(1);
+      });
+      afterEach(() => {
+        localStorage.removeItem(SEQ_KEY);
+        localStorage.removeItem('SUP_FIRST_SYNC_MERGE_DONE_1');
+        localStorage.removeItem('SUP_FIRST_SYNC_MERGE_DONE_3');
+      });
+
+      const expectSwitchPath = async (): Promise<void> => {
+        dialogAnswers(true);
+        expect(await service.completeLogin(next)).toBe('DONE');
+        expect(dialog.open).toHaveBeenCalledTimes(1);
+        expect(wipe.wipeAll).toHaveBeenCalledWith({ nextSession: next });
+        expect(auth.commitSession).not.toHaveBeenCalled();
+      };
+
+      it('seq key > 0 means an unknown previous account: confirm + wipe', async () => {
+        localStorage.setItem(SEQ_KEY, '42');
+        await expectSwitchPath();
+      });
+
+      it('a seq key of 0 is no evidence: keeps data', async () => {
+        localStorage.setItem(SEQ_KEY, '0');
+        expect(await service.completeLogin(next)).toBe('DONE');
+        expect(wipe.wipeAll).not.toHaveBeenCalled();
+        expect(auth.commitSession).toHaveBeenCalledWith(next);
+      });
+
+      it('SuperSync synced ops mean an unknown previous account', async () => {
+        manager.getLastSyncedProviderId.and.returnValue(SyncProviderId.SuperSync);
+        store.hasSyncedOps.and.resolveTo(true);
+        await expectSwitchPath();
+      });
+
+      it('a stored SuperSync encryption key means an unknown previous account', async () => {
+        manager.getProviderConfig.and.resolveTo({ encryptKey: 'k' } as never);
+        await expectSwitchPath();
+      });
+
+      it('done keys of two different accounts are unknown, not "the first one"', async () => {
+        localStorage.setItem('SUP_FIRST_SYNC_MERGE_DONE_1', '1');
+        localStorage.setItem('SUP_FIRST_SYNC_MERGE_DONE_3', '1');
+        await expectSwitchPath();
+      });
+    });
+
+    describe('identity includes the server', () => {
+      beforeEach(() => auth.getSession.and.resolveTo({ userId: 2, email: 'b@c.d' }));
+
+      it('same userId on another baseUrl is an account change', async () => {
+        manager.getProviderConfig.and.resolveTo({
+          baseUrl: 'https://other.example',
+          accessToken: 'x',
+        } as never);
+        expect(await service.completeLogin(next)).toBe('DONE');
+        expect(wipe.wipeAll).toHaveBeenCalledWith({ nextSession: next });
+      });
+
+      it('same userId and same baseUrl (trailing slash ignored) keeps data', async () => {
+        manager.getProviderConfig.and.resolveTo({
+          baseUrl: 'https://same.example/',
+          accessToken: 'x',
+        } as never);
+        expect(
+          await service.completeLogin({ ...next, baseUrl: 'https://same.example' }),
+        ).toBe('DONE');
+        expect(wipe.wipeAll).not.toHaveBeenCalled();
+        expect(auth.commitSession).toHaveBeenCalled();
+      });
     });
 
     it('different userId + cancel: keeps data and does not commit', async () => {

@@ -462,23 +462,8 @@ export const SYNC_FORM: ConfigFormSection<SyncConfig> = {
     {
       key: 'superSync',
       fieldGroup: [
-        // Log in / Log out lives in DialogSyncCfgComponent (needs DI).
-        {
-          hideExpression: (m, v, field) =>
-            field?.parent?.parent?.model.syncProvider !== SyncProviderId.SuperSync,
-          key: 'accessToken',
-          type: 'textarea',
-          className: 'e2e-accessToken',
-          templateOptions: {
-            label: T.F.SYNC.FORM.SUPER_SYNC.L_ACCESS_TOKEN,
-            description: T.F.SYNC.FORM.SUPER_SYNC.ACCESS_TOKEN_DESCRIPTION,
-            rows: 3,
-          },
-          expressions: {
-            'props.required': (field: FormlyFieldConfig) =>
-              field?.parent?.parent?.model?.syncProvider === SyncProviderId.SuperSync,
-          },
-        },
+        // Log in / Log out lives in DialogSyncCfgComponent (needs DI). No raw token
+        // field: accounts only change via login (AccountSessionService.completeLogin).
         // Encryption encouragement warning (shown when encryption is NOT enabled)
         // Hidden during initial setup (encryption dialog opens automatically after save)
         {

@@ -22,6 +22,11 @@ import {
 } from '../../features/user-profile/user-profile-storage.service';
 import { IS_ELECTRON } from '../../app.constants';
 import { OpLog } from '../../core/log';
+import {
+  setLocalDataWipeInProgress,
+  setLocalDataWipeReloading,
+  SKIP_BACKUP_PROMPT_ONCE_KEY,
+} from './local-data-wipe-state';
 
 const WIPED_KEYS = [LAST_SYNCED_PROVIDER_KEY, PROFILE_META_KEY];
 const WIPED_KEY_PREFIXES = [
@@ -29,10 +34,6 @@ const WIPED_KEY_PREFIXES = [
   FIRST_SYNC_MERGE_DONE_KEY_PREFIX,
   PROFILE_DATA_PREFIX,
 ];
-
-let isWipeReloading = false;
-/** The web beforeunload prompt must not cancel the reload that follows a wipe. */
-export const isLocalDataWipeReloading = (): boolean => isWipeReloading;
 
 export type WipeOptions = {
   /** the pending first-sync marker holds the only copy of pre-merge data */
@@ -74,9 +75,17 @@ export class LocalDataWipeService {
           throw new Error('Failed to clear legacy database');
         }
       }
-      await this._lockService.request(LOCK_NAMES.OPERATION_LOG, () =>
-        this._opLogStore.clearAllUserData(),
-      );
+      // From here until the reload: no op capture (except the new session's sync
+      // config op), no compaction, no sync. Only reset if SUP_OPS is still intact.
+      setLocalDataWipeInProgress(true);
+      try {
+        await this._lockService.request(LOCK_NAMES.OPERATION_LOG, () =>
+          this._opLogStore.clearAllUserData(),
+        );
+      } catch (e) {
+        setLocalDataWipeInProgress(false);
+        throw e;
+      }
       const keys = Array.from({ length: localStorage.length }, (_, i) =>
         localStorage.key(i),
       ).filter(
@@ -85,6 +94,8 @@ export class LocalDataWipeService {
           (WIPED_KEYS.includes(k) || WIPED_KEY_PREFIXES.some((p) => k.startsWith(p))),
       );
       keys.forEach((k) => localStorage.removeItem(k));
+      // the emptied store must not make startup offer a backup restore of the old data
+      localStorage.setItem(SKIP_BACKUP_PROMPT_ONCE_KEY, '1');
       // Whole private cfg incl. encryptKey: it belongs to the previous account.
       const superSync = await this._providerManager.getProviderById(
         SyncProviderId.SuperSync,
@@ -98,7 +109,7 @@ export class LocalDataWipeService {
       OpLog.normal('[LocalDataWipe] Local data wiped, reloading', {
         removedKeys: keys.length,
       });
-      isWipeReloading = true;
+      setLocalDataWipeReloading();
       this._reload();
     });
   }

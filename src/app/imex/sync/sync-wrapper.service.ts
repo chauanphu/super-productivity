@@ -76,6 +76,7 @@ import { OperationLogSyncService } from '../../op-log/sync/operation-log-sync.se
 import { WrappedProviderService } from '../../op-log/sync-providers/wrapped-provider.service';
 import { SuperSyncProvider } from '../../op-log/sync-providers/super-sync/super-sync';
 import { FirstSyncMergeService } from '../../op-log/sync/first-sync-merge/first-sync-merge.service';
+import { isLocalDataWipeInProgress } from '../../op-log/persistence/local-data-wipe-state';
 
 @Injectable({
   providedIn: 'root',
@@ -193,7 +194,10 @@ export class SyncWrapperService {
    * Used by ImmediateUploadService to avoid uploading during critical encryption operations.
    */
   get isEncryptionOperationInProgress(): boolean {
-    return this._isEncryptionOperationInProgress$.getValue();
+    // A local data wipe keeps syncs blocked until its reload (ImmediateUpload reads this too).
+    return (
+      this._isEncryptionOperationInProgress$.getValue() || isLocalDataWipeInProgress()
+    );
   }
 
   /**
@@ -237,8 +241,8 @@ export class SyncWrapperService {
 
   async sync(): Promise<SyncStatus | 'HANDLED_ERROR'> {
     // Block sync if encryption operation is in progress (password change, enable/disable)
-    if (this._isEncryptionOperationInProgress$.getValue()) {
-      SyncLog.log('Sync blocked: encryption operation in progress');
+    if (this.isEncryptionOperationInProgress) {
+      SyncLog.log('Sync blocked: encryption operation or local data wipe in progress');
       return 'HANDLED_ERROR';
     }
 
