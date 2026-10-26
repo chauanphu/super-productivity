@@ -132,25 +132,8 @@ test.describe('@supersync SuperSync Account Deletion', () => {
       const configB = getSuperSyncConfig(userB);
       console.log(`[Reconfigure] ✓ Created user B: ${userB.userId}`);
 
-      // 4. Reconfigure client with user B credentials
-      // Open sync settings via right-click
-      await client.sync.syncBtn.click({ button: 'right' });
-      await client.sync.providerSelect.waitFor({ state: 'visible', timeout: 10000 });
-
-      // Update access token
-      await client.sync.accessTokenInput.clear();
-      await client.sync.accessTokenInput.fill(configB.accessToken);
-
-      // Save configuration
-      await expect(client.sync.saveBtn).toBeEnabled({ timeout: 5000 });
-      await client.sync.saveBtn.click();
-      await client.page
-        .locator('mat-dialog-container')
-        .waitFor({ state: 'detached', timeout: 5000 })
-        .catch(() => {});
-
-      // Wait for any dialogs to settle
-      await client.page.waitForTimeout(1000);
+      // 4. Log in as user B (switching accounts confirms + wipes local data, then reloads)
+      await client.sync.loginViaPage(configB);
 
       // 5. Sync and verify it works with user B
       await client.sync.syncAndWait();

@@ -3,7 +3,9 @@ import { BasePage } from './base.page';
 
 export interface SuperSyncConfig {
   baseUrl: string;
-  accessToken: string;
+  /** Account login (email + password), used on the login page. */
+  email: string;
+  accountPassword: string;
   isEncryptionEnabled?: boolean;
   password?: string;
   /**
@@ -40,7 +42,6 @@ export class SuperSyncPage extends BasePage {
   readonly syncBtn: Locator;
   readonly providerSelect: Locator;
   readonly baseUrlInput: Locator;
-  readonly accessTokenInput: Locator;
   readonly enableEncryptionBtn: Locator;
   readonly disableEncryptionBtn: Locator;
   readonly encryptionPasswordInput: Locator;
@@ -70,7 +71,6 @@ export class SuperSyncPage extends BasePage {
     this.syncBtn = page.locator('button.sync-btn');
     this.providerSelect = page.locator('formly-field-mat-select mat-select');
     this.baseUrlInput = page.locator('.e2e-baseUrl input');
-    this.accessTokenInput = page.locator('.e2e-accessToken textarea');
     this.enableEncryptionBtn = page.locator('.e2e-enable-encryption-btn button');
     this.disableEncryptionBtn = page.locator('.e2e-disable-encryption-btn button');
     this.encryptionPasswordInput = page.locator('.e2e-encryptKey input[type="password"]');
@@ -175,6 +175,62 @@ export class SuperSyncPage extends BasePage {
    *
    * @param config - SuperSync configuration (includes optional waitForInitialSync flag)
    */
+  private _isBlockingBackgroundSync = false;
+
+  private async _setE2eBlockFlags(): Promise<void> {
+    await this.page.evaluate(() => {
+      (globalThis as any).__SP_E2E_BLOCK_IMMEDIATE_UPLOAD = true;
+      (globalThis as any).__SP_E2E_BLOCK_WS_DOWNLOAD = true;
+    });
+  }
+
+  /**
+   * Logs in through the login page with the test user's email + password.
+   * Switching from another account asks to delete local data; that is confirmed
+   * and the app reloads into the new account.
+   */
+  async loginViaPage(
+    config: Pick<SuperSyncConfig, 'baseUrl' | 'email' | 'accountPassword'>,
+  ): Promise<void> {
+    // Hash navigation keeps the page (and the e2e globals set on it) alive.
+    await this.page.evaluate(() => {
+      window.location.hash = '#/login';
+    });
+    const form = this.page.locator('login-page form');
+    await form.waitFor({ state: 'visible', timeout: 10000 });
+    await form.locator('input[name="baseUrl"]').fill(config.baseUrl);
+    await form.locator('input[name="email"]').fill(config.email);
+    await form.locator('input[name="password"]').fill(config.accountPassword);
+    await form.locator('button[type="submit"]').click();
+
+    const deleteLocalDataBtn = this.page.locator('dialog-confirm button', {
+      hasText: 'Delete local data',
+    });
+    const outcome = await Promise.race([
+      this.page
+        .waitForURL(/#\/(tag|project)\/.+\/tasks/, { timeout: 30000 })
+        .then(() => 'home' as const),
+      deleteLocalDataBtn
+        .waitFor({ state: 'visible', timeout: 30000 })
+        .then(() => 'confirm_wipe' as const),
+    ]);
+    if (outcome === 'confirm_wipe') {
+      await Promise.all([
+        this.page.waitForEvent('load', { timeout: 30000 }),
+        deleteLocalDataBtn.click(),
+      ]);
+      // The reload keeps the #/login hash; go home as the new account.
+      await this.page.evaluate(() => {
+        window.location.hash = '#/';
+      });
+      await this.page.waitForURL(/#\/(tag|project)\/.+\/tasks/, { timeout: 30000 });
+      // The reload dropped the page globals.
+      if (this._isBlockingBackgroundSync) {
+        await this._setE2eBlockFlags();
+      }
+    }
+  }
+
   async setupSuperSync(config: SuperSyncConfig): Promise<void> {
     // Block WebSocket connections and immediate uploads by default so tests have
     // controlled, sequential sync via syncAndWait() only.
@@ -196,11 +252,9 @@ export class SuperSyncPage extends BasePage {
       //    opens (before it's closed). Setting __SP_E2E_BLOCK_WS_DOWNLOAD ensures
       //    WsTriggeredDownloadService ignores any such notifications, preventing
       //    uncontrolled background syncs that race with explicit syncAndWait() calls.
-      await this.page.evaluate(() => {
-        (globalThis as any).__SP_E2E_BLOCK_IMMEDIATE_UPLOAD = true;
-        (globalThis as any).__SP_E2E_BLOCK_WS_DOWNLOAD = true;
-      });
+      await this._setE2eBlockFlags();
     }
+    this._isBlockingBackgroundSync = !config.enableWebSocket;
 
     // Extract waitForInitialSync from config, defaulting to true
     const waitForInitialSync = config.waitForInitialSync ?? true;
@@ -276,37 +330,8 @@ export class SuperSyncPage extends BasePage {
       .waitForURL(/#\/(tag|project)\/.+\/tasks/, { timeout: 10000 })
       .catch(() => {});
 
-    // Open sync settings via right-click (context menu)
-    // This allows configuring sync even when already set up
-    // Use noWaitAfter to prevent blocking on Angular hash navigation
-    await this.syncBtn.click({ button: 'right', noWaitAfter: true });
-
-    // Wait for the provider select (indicates dialog is open)
-    await this.providerSelect.waitFor({ state: 'visible', timeout: 10000 });
-
-    // Select "SuperSync" from provider dropdown with retry logic
-    await this.selectSuperSyncProviderWithRetry();
-    await this.page.waitForTimeout(500); // Wait for dropdown to close and form to update
-
-    // IMPORTANT: The baseUrl field is now inside the "Advanced Config" collapsible section.
-    // We need to expand it first to access the field.
-    const advancedCollapsible = this.page.locator(
-      '.collapsible-header:has-text("Advanced")',
-    );
-    await advancedCollapsible.waitFor({ state: 'visible', timeout: 5000 });
-
-    // Check if already expanded (baseUrl input is visible)
-    const isExpanded = await this.baseUrlInput.isVisible().catch(() => false);
-    if (!isExpanded) {
-      await advancedCollapsible.click();
-      await this.baseUrlInput.waitFor({ state: 'visible', timeout: 3000 });
-    }
-
-    // Fill in base URL
-    await this.baseUrlInput.fill(config.baseUrl);
-
-    // Fill in access token (this field is NOT in the Advanced section)
-    await this.accessTokenInput.fill(config.accessToken);
+    // SuperSync sessions only start through the login page (no raw token field).
+    await this.loginViaPage(config);
 
     // Store the encryption password so syncAndWait() can handle dialogs mid-test
     if (config.password) {
@@ -319,15 +344,8 @@ export class SuperSyncPage extends BasePage {
     // when receiving encrypted data from the server
     const needsEncryptionEnabled = config.isEncryptionEnabled && config.password;
 
-    // Save configuration first (without encryption changes)
-    // Encryption can only be enabled/disabled after the provider is active
-    await expect(this.saveBtn).toBeEnabled({ timeout: 5000 });
-    await this.saveBtn.click();
-
-    // Wait for the config dialog to close
-    // The save() method is async and may take time to complete
-    // Note: After save, a password dialog might appear if server has encrypted data
-    // So we check for the config dialog specifically, not just any dialog
+    // Login enabled SuperSync and started the first sync (like saving the config
+    // dialog did before). A password dialog may appear if the server has encrypted data.
     await this.page.waitForTimeout(1000);
 
     // Define locators for dialogs we might see
