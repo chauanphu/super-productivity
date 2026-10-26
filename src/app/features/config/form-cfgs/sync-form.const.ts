@@ -19,7 +19,6 @@ export interface SyncCollapsibleProps extends FormlyFieldProps {
   syncRole?: 'advanced';
 }
 import { IS_NATIVE_PLATFORM } from '../../../util/is-native-platform';
-import { SUPER_SYNC_DEFAULT_BASE_URL } from '../../../op-log/sync-providers/super-sync/super-sync.model';
 import {
   closeAllDialogs,
   openDisableEncryptionDialogForFileBased,
@@ -518,7 +517,7 @@ export const SYNC_FORM: ConfigFormSection<SyncConfig> = {
               templateOptions: {
                 label: T.F.SYNC.FORM.SUPER_SYNC.L_SERVER_URL,
                 description: T.F.SYNC.FORM.SUPER_SYNC.SERVER_URL_DESCRIPTION,
-                placeholder: SUPER_SYNC_DEFAULT_BASE_URL,
+                placeholder: 'https://sync.example.com',
               },
               expressions: {
                 // The server belongs to the signed-in account; change it by logging in.

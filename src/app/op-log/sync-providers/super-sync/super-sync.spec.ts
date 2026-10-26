@@ -1,5 +1,5 @@
 import { SuperSyncProvider } from './super-sync';
-import { SuperSyncPrivateCfg, SUPER_SYNC_DEFAULT_BASE_URL } from './super-sync.model';
+import { SuperSyncPrivateCfg } from './super-sync.model';
 import { SyncCredentialStore } from '../credential-store.service';
 import { SyncProviderId } from '../provider.const';
 import {
@@ -131,14 +131,14 @@ describe('SuperSyncProvider', () => {
       expect(result).toBe(false);
     });
 
-    it('should return true when baseUrl is missing but accessToken is set', async () => {
+    it('should return false when baseUrl is missing (no upstream fallback)', async () => {
       mockPrivateCfgStore.load.and.returnValue(
-        Promise.resolve({ accessToken: 'token' } as SuperSyncPrivateCfg),
+        Promise.resolve({ accessToken: 'token', baseUrl: '' } as SuperSyncPrivateCfg),
       );
 
       const result = await provider.isReady();
 
-      expect(result).toBe(true);
+      expect(result).toBe(false);
     });
 
     it('should return false when accessToken is missing', async () => {
@@ -248,15 +248,12 @@ describe('SuperSyncProvider', () => {
       });
     });
 
-    it('should fall back to the default base URL when none is configured', async () => {
+    it('should return null when no base URL is configured', async () => {
       mockPrivateCfgStore.load.and.returnValue(
         Promise.resolve({ accessToken: 'test-access-token' } as SuperSyncPrivateCfg),
       );
 
-      await expectAsync(provider.getWebSocketParams()).toBeResolvedTo({
-        baseUrl: SUPER_SYNC_DEFAULT_BASE_URL,
-        accessToken: 'test-access-token',
-      });
+      expect(await provider.getWebSocketParams()).toBeNull();
     });
   });
 
@@ -316,6 +313,17 @@ describe('SuperSyncProvider', () => {
       const bodyJson = await decompressGzip(fetchSpy.calls.mostRecent().args[1].body);
       const body = JSON.parse(bodyJson);
       expect(body.lastKnownServerSeq).toBe(2);
+    });
+
+    it('should never fetch when baseUrl is empty', async () => {
+      mockPrivateCfgStore.load.and.returnValue(
+        Promise.resolve({ accessToken: 'token', baseUrl: '' } as SuperSyncPrivateCfg),
+      );
+
+      await expectAsync(
+        provider.uploadOps([createMockOperation()], 'client-1'),
+      ).toBeRejectedWith(jasmine.any(MissingCredentialsSPError));
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
 
     it('should throw MissingCredentialsSPError when config is missing', async () => {
@@ -1228,7 +1236,7 @@ describe('SuperSyncProvider', () => {
         const { compressWithGzipToString } =
           await import('../../encryption/compression-handler');
         const base64Gzip = await compressWithGzipToString(jsonPayload);
-        const baseUrl = (cfg.baseUrl || SUPER_SYNC_DEFAULT_BASE_URL).replace(/\/$/, '');
+        const baseUrl = (cfg.baseUrl ?? '').replace(/\/$/, '');
         const url = `${baseUrl}${path}`;
         const sanitizedToken = cfg.accessToken.replace(/[^\x20-\x7E]/g, '');
 

@@ -5,10 +5,7 @@ import { IS_ANDROID_WEB_VIEW } from '../../../util/is-android-web-view';
 import { androidInterface } from '../android-interface';
 import { SyncProviderManager } from '../../../op-log/sync-providers/provider-manager.service';
 import { SyncProviderId } from '../../../op-log/sync-providers/provider.const';
-import {
-  SUPER_SYNC_DEFAULT_BASE_URL,
-  SuperSyncPrivateCfg,
-} from '../../../op-log/sync-providers/super-sync/super-sync.model';
+import { SuperSyncPrivateCfg } from '../../../op-log/sync-providers/super-sync/super-sync.model';
 import { skipWhileApplyingRemoteOps } from '../../../util/skip-during-sync.operator';
 import { DroidLog } from '../../../core/log';
 import { CurrentProviderPrivateCfg } from '../../../op-log/core/types/sync.types';
@@ -56,16 +53,16 @@ export class AndroidSyncBridgeEffects {
           tap((cfg) => {
             if (cfg.providerId === SyncProviderId.SuperSync && cfg.privateCfg) {
               const privateCfg = cfg.privateCfg as SuperSyncPrivateCfg;
-              if (privateCfg.accessToken) {
-                const baseUrl = privateCfg.baseUrl || SUPER_SYNC_DEFAULT_BASE_URL;
+              // No default server: without a baseUrl the worker must not sync at all.
+              if (privateCfg.accessToken && privateCfg.baseUrl) {
                 DroidLog.log('AndroidSyncBridgeEffects: Setting SuperSync credentials');
                 androidInterface.setSuperSyncCredentials?.(
-                  baseUrl,
+                  privateCfg.baseUrl,
                   privateCfg.accessToken,
                 );
               } else {
                 DroidLog.log(
-                  'AndroidSyncBridgeEffects: No access token, clearing credentials',
+                  'AndroidSyncBridgeEffects: No access token or server URL, clearing credentials',
                 );
                 androidInterface.clearSuperSyncCredentials?.();
               }

@@ -13,7 +13,7 @@ import {
   RestoreSnapshotResponse,
 } from '../provider.interface';
 import { SyncCredentialStore } from '../credential-store.service';
-import { SuperSyncPrivateCfg, SUPER_SYNC_DEFAULT_BASE_URL } from './super-sync.model';
+import { SuperSyncPrivateCfg } from './super-sync.model';
 import {
   MissingCredentialsSPError,
   AuthFailSPError,
@@ -83,7 +83,7 @@ export class SuperSyncProvider
 
   async isReady(): Promise<boolean> {
     const cfg = await this.privateCfg.load();
-    return !!(cfg && cfg.accessToken);
+    return !!(cfg && cfg.accessToken && cfg.baseUrl);
   }
 
   async setPrivateCfg(cfg: SuperSyncPrivateCfg): Promise<void> {
@@ -322,7 +322,7 @@ export class SuperSyncProvider
     accessToken: string;
   } | null> {
     const cfg = await this.privateCfg.load();
-    if (!cfg?.accessToken) {
+    if (!cfg?.accessToken || !cfg.baseUrl) {
       return null;
     }
     return {
@@ -375,7 +375,11 @@ export class SuperSyncProvider
   }
 
   private _resolveBaseUrl(cfg: SuperSyncPrivateCfg): string {
-    return (cfg.baseUrl || SUPER_SYNC_DEFAULT_BASE_URL).replace(/\/$/, '');
+    // No default server: never contact a server the user did not log in to.
+    if (!cfg.baseUrl) {
+      throw new MissingCredentialsSPError('SuperSync server URL is not configured');
+    }
+    return cfg.baseUrl.replace(/\/$/, '');
   }
 
   /**
@@ -388,7 +392,7 @@ export class SuperSyncProvider
     }
     // Note: SyncCredentialStore.load() has its own in-memory caching
     const cfg = await this.privateCfg.load();
-    const baseUrl = cfg?.baseUrl || SUPER_SYNC_DEFAULT_BASE_URL;
+    const baseUrl = cfg?.baseUrl ?? '';
     // Include accessToken in the hash so different users on the same server
     // get separate lastServerSeq tracking. This ensures server migration detection
     // works correctly when switching between accounts on the same server.

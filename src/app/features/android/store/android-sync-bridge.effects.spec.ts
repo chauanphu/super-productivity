@@ -34,7 +34,7 @@ describe('AndroidSyncBridgeEffects - credential mirroring logic', () => {
   ): 'set' | 'clear-no-token' | 'clear-not-supersync' => {
     if (cfg.providerId === SyncProviderId.SuperSync && cfg.privateCfg) {
       const privateCfg = cfg.privateCfg as SuperSyncPrivateCfg;
-      if (privateCfg.accessToken) {
+      if (privateCfg.accessToken && privateCfg.baseUrl) {
         return 'set';
       } else {
         return 'clear-no-token';
@@ -104,6 +104,10 @@ describe('AndroidSyncBridgeEffects - credential mirroring logic', () => {
   describe('credential set/clear decision', () => {
     it('should set credentials for SuperSync with valid token', () => {
       expect(getAction(superSyncCfg('my-token', 'https://sync.example.com'))).toBe('set');
+    });
+
+    it('should clear when SuperSync has no server URL (no upstream fallback)', () => {
+      expect(getAction(superSyncCfg('my-token'))).toBe('clear-no-token');
     });
 
     it('should clear when SuperSync has empty access token', () => {

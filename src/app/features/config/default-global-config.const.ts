@@ -1,5 +1,3 @@
-import { environment } from '../../../environments/environment';
-
 import { TaskReminderOptionId } from '../tasks/task.model';
 import { GlobalConfigState } from './global-config.model';
 
@@ -221,9 +219,8 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalConfigState = {
     },
 
     superSync: {
-      baseUrl: environment.production
-        ? 'https://sync.super-productivity.com'
-        : 'http://localhost:1901',
+      // No default server: the URL comes from the login page (self-hosted).
+      baseUrl: '',
       userName: null,
       password: null,
       accessToken: null,
