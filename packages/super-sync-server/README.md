@@ -180,6 +180,11 @@ In Super Productivity, configure the Custom Sync provider with:
 The server includes scripts for administrative tasks. These use the configured database.
 
 ```bash
+# Create a user or set/reset a password (min 10 chars; user is marked verified).
+# Passwords on the command line land in shell history - clear it afterwards.
+# Run `pg_dump` before deploying a new version.
+npm run set-password -- user@example.com 'a-long-password'
+
 # Delete a user account
 npm run delete-user -- user@example.com
 
