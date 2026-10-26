@@ -2,7 +2,12 @@ import {
   buildMergePayload,
   diffForFirstSync,
   FirstSyncMergePayload,
+  foldCurrentIntoSnapshot,
 } from './first-sync-merge';
+import { DEFAULT_SIMPLE_COUNTERS } from '../../../features/simple-counter/simple-counter.const';
+import { SimpleCounter } from '../../../features/simple-counter/simple-counter.model';
+import { DEFAULT_BOARDS } from '../../../features/boards/boards.const';
+import { Reminder } from '../../../features/reminder/reminder.model';
 import { createAppDataCompleteMock } from '../../../util/app-data-mock';
 import { AppDataComplete } from '../../model/model-config';
 import { DEFAULT_TASK, Task } from '../../../features/tasks/task.model';
@@ -396,4 +401,151 @@ describe('first-sync-merge', () => {
     });
   });
   /* eslint-enable @typescript-eslint/naming-convention */
+  describe('remaining models (nothing of this device is dropped)', () => {
+    const counter = (id: string, p: Partial<SimpleCounter> = {}): SimpleCounter => ({
+      ...DEFAULT_SIMPLE_COUNTERS[0],
+      id,
+      title: id,
+      ...p,
+    });
+    const reminder = (
+      id: string,
+      relatedId: string,
+      type: 'TASK' | 'NOTE',
+    ): Reminder => ({
+      id,
+      relatedId,
+      type,
+      remindAt: 1,
+      title: id,
+    });
+    const withExtra = (
+      d: AppDataComplete,
+      x: Partial<AppDataComplete>,
+    ): AppDataComplete => ({ ...d, ...x });
+    const empty = (): FirstSyncMergePayload => buildMergePayload(data(), data(), {});
+
+    it('id collections: adds local-only items, never overwrites remote ones', () => {
+      const local = withExtra(data({ tasks: [task('t1')] }), {
+        simpleCounter: entities([counter('c1'), counter('cBoth', { title: 'L' })]),
+        metric: entities([{ id: '2026-01-01' }, { id: '2026-01-02', notes: 'L' }]),
+        pluginUserData: [
+          { id: 'pl1', data: 'L' },
+          { id: 'plBoth', data: 'L' },
+        ],
+        pluginMetadata: [{ id: 'pm1', isEnabled: true }],
+        boards: { boardCfgs: [{ ...DEFAULT_BOARDS[0], id: 'b1', title: 'mine' }] },
+      });
+      const remote = withExtra(data(), {
+        simpleCounter: entities([counter('cBoth', { title: 'R' })]),
+        metric: entities([{ id: '2026-01-02', notes: 'R' }]),
+        pluginUserData: [{ id: 'plBoth', data: 'R' }],
+        pluginMetadata: [],
+        boards: { boardCfgs: [] },
+      });
+      const p = buildMergePayload(local, remote, {});
+      expect(ids(p.simpleCounters)).toEqual(['c1']);
+      expect(ids(p.metrics)).toEqual(['2026-01-01']);
+      expect(ids(p.pluginUserData)).toEqual(['pl1']);
+      expect(ids(p.pluginMetadata)).toEqual(['pm1']);
+      expect(ids(p.boardCfgs)).toEqual(['b1']);
+    });
+
+    it('built-in defaults on the remote do not hide local edits of them', () => {
+      const editedCounter = { ...DEFAULT_SIMPLE_COUNTERS[0], isEnabled: true };
+      const editedBoard = { ...DEFAULT_BOARDS[0], cols: 3 };
+      const local = withExtra(data(), {
+        simpleCounter: entities([editedCounter, DEFAULT_SIMPLE_COUNTERS[1]]),
+        boards: { boardCfgs: [editedBoard, DEFAULT_BOARDS[1]] },
+      });
+      const remote = withExtra(data(), {
+        simpleCounter: entities(DEFAULT_SIMPLE_COUNTERS),
+        boards: { boardCfgs: DEFAULT_BOARDS },
+      });
+      const p = buildMergePayload(local, remote, {});
+      expect(p.simpleCounters).toEqual([editedCounter]);
+      expect(p.boardCfgs).toEqual([editedBoard]);
+    });
+
+    it('reminders: local-only, dropped when their task/note does not exist after the merge', () => {
+      const local = withExtra(data({ tasks: [task('t1')], notes: [note('n1', null)] }), {
+        reminders: [
+          reminder('r1', 't1', 'TASK'),
+          reminder('r2', 'gone', 'TASK'),
+          reminder('r3', 'n1', 'NOTE'),
+        ],
+      });
+      const p = buildMergePayload(local, data(), {});
+      expect(ids(p.reminders)).toEqual(['r1', 'r3']);
+    });
+
+    it('planner: adds days the remote lacks, only with tasks that exist', () => {
+      const local = withExtra(data({ tasks: [task('t1')] }), {
+        planner: {
+          days: { d1: ['t1', 'gone'], d2: ['t1'], d3: ['gone'] },
+          addPlannedTasksDialogLastShown: undefined,
+        },
+      });
+      const remote = withExtra(data(), {
+        planner: { days: { d2: [] }, addPlannedTasksDialogLastShown: undefined },
+      });
+      expect(buildMergePayload(local, remote, {}).plannerDays).toEqual({ d1: ['t1'] });
+    });
+
+    it('menuTree: local tree only when the remote tree is the default', () => {
+      const tree = {
+        projectTree: [{ k: 'project', id: 'p' }],
+        tagTree: [],
+      } as unknown as AppDataComplete['menuTree'];
+      const local = withExtra(data(), { menuTree: tree });
+      expect(buildMergePayload(local, data(), {}).menuTree).toEqual(tree);
+      const remote = withExtra(data(), {
+        menuTree: {
+          projectTree: [{ k: 'project', id: 'x' }],
+          tagTree: [],
+        } as unknown as AppDataComplete['menuTree'],
+      });
+      expect(buildMergePayload(local, remote, {}).menuTree).toBeNull();
+    });
+
+    it('identical data yields empty new fields', () => {
+      const p = empty();
+      expect(p.simpleCounters).toEqual([]);
+      expect(p.metrics).toEqual([]);
+      expect(p.reminders).toEqual([]);
+      expect(p.boardCfgs).toEqual([]);
+      expect(p.plannerDays).toEqual({});
+      expect(p.pluginUserData).toEqual([]);
+      expect(p.pluginMetadata).toEqual([]);
+      expect(p.menuTree).toBeNull();
+    });
+  });
+
+  describe('foldCurrentIntoSnapshot', () => {
+    it('adds new items and keeps the newer copy by modified', () => {
+      const snap = data({
+        tasks: [task('a', { modified: 5, title: 'snap' }), task('b', { modified: 5 })],
+      });
+      const cur = data({
+        tasks: [
+          task('a', { modified: 9, title: 'cur' }),
+          task('b', { modified: 1, title: 'old' }),
+          task('c'),
+        ],
+        archive: [task('arch')],
+      });
+      const f = foldCurrentIntoSnapshot(snap, cur);
+      expect(f.task.entities['a']!.title).toBe('cur');
+      expect(f.task.entities['b']!.title).toBe('b');
+      expect(f.task.ids).toEqual(['a', 'b', 'c']);
+      expect(f.archiveYoung.task.ids).toEqual(['arch']);
+    });
+
+    it('never removes snapshot items', () => {
+      const snap = data({ projects: [project('p')], notes: [note('n', null)] });
+      const f = foldCurrentIntoSnapshot(snap, data());
+      expect(f.project.ids).toEqual(['p']);
+      expect(f.note.ids).toEqual(['n']);
+    });
+  });
 });

@@ -492,6 +492,14 @@ describe('ArchiveOperationHandler', () => {
         timeTracking: { project: {}, tag: {} },
         globalConfig: null,
         archiveTasks,
+        simpleCounters: [],
+        metrics: [],
+        reminders: [],
+        boardCfgs: [],
+        plannerDays: {},
+        pluginUserData: [],
+        pluginMetadata: [],
+        menuTree: null,
       });
       const actionWith = (
         archiveTasks: TaskCopy[],

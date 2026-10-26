@@ -45,6 +45,14 @@ const empty = (): FirstSyncMergePayload => ({
   timeTracking: { project: {}, tag: {} },
   globalConfig: null,
   archiveTasks: [],
+  simpleCounters: [],
+  metrics: [],
+  reminders: [],
+  boardCfgs: [],
+  plannerDays: {},
+  pluginUserData: [],
+  pluginMetadata: [],
+  menuTree: null,
 });
 
 const mkTask = (id: string): Task => ({ ...DEFAULT_TASK, id, title: id, projectId: 'p' });
@@ -64,6 +72,20 @@ const bigPayload = (): FirstSyncMergePayload => {
     ),
     timeTracking: { project, tag: {} },
     globalConfig: DEFAULT_GLOBAL_CONFIG,
+    reminders: Array.from({ length: 300 }, (_, i) => ({
+      id: `r${i}`,
+      relatedId: `t${i}`,
+      type: 'TASK' as const,
+      remindAt: i,
+      title: `r${i}`,
+    })),
+    metrics: Array.from({ length: 300 }, (_, i) => ({ id: `m${i}`, notes: 'x' })),
+    plannerDays: Object.fromEntries(
+      Array.from({ length: 300 }, (_, i) => [`d${i}`, [`t${i}`, `t${i + 1}`]]),
+    ),
+    pluginUserData: [{ id: 'u', data: 'x' }],
+    pluginMetadata: [{ id: 'm', isEnabled: true }],
+    menuTree: { projectTree: [], tagTree: [] },
   };
 };
 
@@ -77,6 +99,20 @@ const union = (chunks: FirstSyncMergePayload[]): FirstSyncMergePayload => {
     u.taskRepeatCfgs.push(...c.taskRepeatCfgs);
     u.issueProviders.push(...c.issueProviders);
     u.archiveTasks.push(...c.archiveTasks);
+    u.simpleCounters.push(...c.simpleCounters);
+    u.metrics.push(...c.metrics);
+    u.reminders.push(...c.reminders);
+    u.boardCfgs.push(...c.boardCfgs);
+    u.pluginUserData.push(...c.pluginUserData);
+    u.pluginMetadata.push(...c.pluginMetadata);
+    for (const [day, ids] of Object.entries(c.plannerDays)) {
+      expect(u.plannerDays[day]).toBeUndefined(); // no duplicates
+      u.plannerDays[day] = ids;
+    }
+    if (c.menuTree) {
+      expect(u.menuTree).toBeNull();
+      u.menuTree = c.menuTree;
+    }
     for (const kind of ['project', 'tag'] as const) {
       for (const [ctx, byDate] of Object.entries(c.timeTracking[kind])) {
         for (const [date, entry] of Object.entries(byDate)) {

@@ -19,6 +19,12 @@ const ARRAY_FIELDS = [
   'taskRepeatCfgs',
   'issueProviders',
   'archiveTasks',
+  'simpleCounters',
+  'metrics',
+  'reminders',
+  'boardCfgs',
+  'pluginUserData',
+  'pluginMetadata',
 ] as const;
 
 const emptyChunk = (): FirstSyncMergePayload => ({
@@ -31,13 +37,21 @@ const emptyChunk = (): FirstSyncMergePayload => ({
   timeTracking: { project: {}, tag: {} },
   globalConfig: null,
   archiveTasks: [],
+  simpleCounters: [],
+  metrics: [],
+  reminders: [],
+  boardCfgs: [],
+  plannerDays: {},
+  pluginUserData: [],
+  pluginMetadata: [],
+  menuTree: null,
 });
 
 /**
  * Splits a merge payload so each `applyFirstSyncMerge` op stays below the server's
  * 20,000-key limit for non-full-state ops (default 10,000 leaves room for the op wrapper).
  * Entities and (context, date) time tracking entries are atomic; one bigger than
- * maxKeys gets its own chunk. globalConfig goes into the first chunk only.
+ * maxKeys gets its own chunk. globalConfig and menuTree go into the first chunk only.
  * Always returns at least one chunk (an empty payload gives one empty chunk).
  * Chunks are upsert-only and disjoint, so their apply order does not change the result.
  */
@@ -64,6 +78,10 @@ export const splitFirstSyncMergePayload = (
     const cfg = payload.globalConfig;
     add(countPayloadKeys(cfg), (c) => (c.globalConfig = cfg));
   }
+  if (payload.menuTree) {
+    const tree = payload.menuTree;
+    add(countPayloadKeys(tree), (c) => (c.menuTree = tree));
+  }
   for (const field of ARRAY_FIELDS) {
     for (const item of payload[field]) {
       add(1 + countPayloadKeys(item), (c) => (c[field] as unknown[]).push(item));
@@ -78,6 +96,9 @@ export const splitFirstSyncMergePayload = (
         });
       }
     }
+  }
+  for (const [day, ids] of Object.entries(payload.plannerDays)) {
+    add(1 + countPayloadKeys(ids), (c) => (c.plannerDays[day] = ids));
   }
   chunks.push(cur);
   return chunks;

@@ -10,6 +10,18 @@ import { Note } from '../../../features/note/note.model';
 import { TaskRepeatCfg } from '../../../features/task-repeat-cfg/task-repeat-cfg.model';
 import { IssueProvider } from '../../../features/issue/issue.model';
 import { TimeTrackingState } from '../../../features/time-tracking/time-tracking.model';
+import { SimpleCounter } from '../../../features/simple-counter/simple-counter.model';
+import { DEFAULT_SIMPLE_COUNTERS } from '../../../features/simple-counter/simple-counter.const';
+import { Metric } from '../../../features/metric/metric.model';
+import { Reminder } from '../../../features/reminder/reminder.model';
+import { BoardCfg } from '../../../features/boards/boards.model';
+import { DEFAULT_BOARDS } from '../../../features/boards/boards.const';
+import { MenuTreeState } from '../../../features/menu-tree/store/menu-tree.model';
+import { menuTreeInitialState } from '../../../features/menu-tree/store/menu-tree.reducer';
+import {
+  PluginMetadata,
+  PluginUserData,
+} from '../../../plugins/plugin-persistence.model';
 
 /**
  * Pure first-login merge (spec decision 3). Entities are matched by ID only.
@@ -29,6 +41,16 @@ export type FirstSyncMergePayload = {
   timeTracking: TimeTrackingState;
   globalConfig: GlobalConfigState | null;
   archiveTasks: TaskCopy[];
+  simpleCounters: SimpleCounter[];
+  metrics: Metric[];
+  reminders: Reminder[];
+  boardCfgs: BoardCfg[];
+  /** planner days the remote lacks, task ids filtered to tasks that exist after the merge */
+  plannerDays: Record<string, string[]>;
+  pluginUserData: PluginUserData[];
+  pluginMetadata: PluginMetadata[];
+  /** local tree, only when the remote tree is still the default (empty) */
+  menuTree: MenuTreeState | null;
 };
 
 type EntityMap<T> = { entities?: Record<string, T | undefined> } | undefined;
@@ -46,6 +68,30 @@ const stableJson = (v: unknown): string =>
         )
       : val,
   );
+
+const byId = <T extends { id: string }>(
+  items: readonly T[] | undefined,
+): Record<string, T | undefined> =>
+  Object.fromEntries((items ?? []).map((i) => [i.id, i]));
+
+/**
+ * Local items the remote lacks by ID. A remote item that still equals its built-in
+ * default (default boards / simple counters) counts as absent, so local edits win.
+ */
+const addLocalById = <T extends { id: string }>(
+  local: readonly T[] | undefined,
+  remote: readonly T[] | undefined,
+  defaults: readonly T[] = [],
+): T[] => {
+  const rm = byId(remote);
+  const dm = byId(defaults);
+  return (local ?? []).filter((i) => {
+    const r = rm[i.id];
+    if (!r) return true;
+    const d = dm[i.id];
+    return !!d && stableJson(r) === stableJson(d) && stableJson(i) !== stableJson(r);
+  });
+};
 
 const withoutModified = <T extends { modified?: number }>(e: T): T => ({
   ...e,
@@ -283,6 +329,22 @@ export const buildMergePayload = (
     !!remote.globalConfig &&
     stableJson(remote.globalConfig) !== stableJson(DEFAULT_GLOBAL_CONFIG);
 
+  // --- remaining models (spec: nothing of this device may be dropped) ---
+  const remoteNotes = map(remote.note);
+  const reminders = addLocalById(local.reminders, remote.reminders).filter((r) =>
+    r.type === 'TASK'
+      ? !!finalTasks[r.relatedId]
+      : !!remoteNotes[r.relatedId] || notes.some((n) => n.id === r.relatedId),
+  );
+  const plannerDays: Record<string, string[]> = {};
+  for (const [day, ids] of Object.entries(local.planner?.days ?? {})) {
+    if (remote.planner?.days?.[day]) continue;
+    const existing = ids.filter((id) => !!finalTasks[id]);
+    if (existing.length) plannerDays[day] = existing;
+  }
+  const isRemoteMenuTreeDefault =
+    !remote.menuTree || stableJson(remote.menuTree) === stableJson(menuTreeInitialState);
+
   return {
     projects,
     tasks: [...payloadTasks.values()],
@@ -293,5 +355,106 @@ export const buildMergePayload = (
     timeTracking,
     globalConfig: remoteHasConfig ? null : local.globalConfig,
     archiveTasks,
+    simpleCounters: addLocalById(
+      values(local.simpleCounter),
+      values(remote.simpleCounter),
+      DEFAULT_SIMPLE_COUNTERS,
+    ),
+    metrics: addLocalById(values(local.metric), values(remote.metric)),
+    reminders,
+    boardCfgs: addLocalById(
+      local.boards?.boardCfgs,
+      remote.boards?.boardCfgs,
+      DEFAULT_BOARDS,
+    ),
+    plannerDays,
+    pluginUserData: addLocalById(local.pluginUserData, remote.pluginUserData),
+    pluginMetadata: addLocalById(local.pluginMetadata, remote.pluginMetadata),
+    menuTree:
+      isRemoteMenuTreeDefault &&
+      local.menuTree &&
+      stableJson(local.menuTree) !== stableJson(menuTreeInitialState)
+        ? local.menuTree
+        : null,
+  };
+};
+
+/**
+ * Resume after an interrupted download: brings edits made since the snapshot back
+ * into it. By ID, additive: items missing in the snapshot are added, an item present
+ * in both is replaced only when the current copy has a newer `modified`.
+ */
+export const foldCurrentIntoSnapshot = (
+  snapshot: AppDataComplete,
+  current: AppDataComplete,
+): AppDataComplete => {
+  type Ent = { id: string; modified?: number };
+  type ES = { ids: (string | number)[]; entities: Record<string, Ent | undefined> };
+  const foldEntities = <S>(snap: S, cur: S): S => {
+    const sn = snap as unknown as ES | undefined;
+    const cu = cur as unknown as ES | undefined;
+    if (!sn || !cu) return snap ?? cur;
+    const entities = { ...sn.entities };
+    const ids = [...sn.ids];
+    for (const e of Object.values(cu.entities)) {
+      if (!e) continue;
+      const old = entities[e.id];
+      if (!old) ids.push(e.id);
+      if (!old || (e.modified ?? 0) > (old.modified ?? 0)) entities[e.id] = e;
+    }
+    return { ...sn, ids, entities } as unknown as S;
+  };
+  const foldArray = <T extends { id: string }>(
+    snap: readonly T[] | undefined,
+    cur: readonly T[] | undefined,
+  ): T[] => [...(snap ?? []), ...addLocalById(cur, snap)];
+  const foldTt = (
+    snap: TimeTrackingState | undefined,
+    cur: TimeTrackingState | undefined,
+  ): TimeTrackingState => {
+    const out: TimeTrackingState = {
+      project: { ...snap?.project },
+      tag: { ...snap?.tag },
+    };
+    for (const kind of ['project', 'tag'] as const) {
+      for (const [ctx, byDate] of Object.entries(cur?.[kind] ?? {})) {
+        out[kind][ctx] = { ...byDate, ...out[kind][ctx] };
+      }
+    }
+    return out;
+  };
+  const foldArchive = (
+    snap: AppDataComplete['archiveYoung'],
+    cur: AppDataComplete['archiveYoung'] | undefined,
+  ): AppDataComplete['archiveYoung'] => ({
+    ...snap,
+    task: foldEntities(snap.task, cur?.task ?? snap.task),
+    timeTracking: foldTt(snap.timeTracking, cur?.timeTracking),
+  });
+
+  return {
+    ...snapshot,
+    task: foldEntities(snapshot.task, current.task),
+    project: foldEntities(snapshot.project, current.project),
+    tag: foldEntities(snapshot.tag, current.tag),
+    note: foldEntities(snapshot.note, current.note),
+    taskRepeatCfg: foldEntities(snapshot.taskRepeatCfg, current.taskRepeatCfg),
+    issueProvider: foldEntities(snapshot.issueProvider, current.issueProvider),
+    simpleCounter: foldEntities(snapshot.simpleCounter, current.simpleCounter),
+    metric: foldEntities(snapshot.metric, current.metric),
+    timeTracking: foldTt(snapshot.timeTracking, current.timeTracking),
+    reminders: foldArray(snapshot.reminders, current.reminders),
+    boards: {
+      ...snapshot.boards,
+      boardCfgs: foldArray(snapshot.boards?.boardCfgs, current.boards?.boardCfgs),
+    },
+    planner: {
+      ...snapshot.planner,
+      days: { ...current.planner?.days, ...snapshot.planner?.days },
+    },
+    pluginUserData: foldArray(snapshot.pluginUserData, current.pluginUserData),
+    pluginMetadata: foldArray(snapshot.pluginMetadata, current.pluginMetadata),
+    archiveYoung: foldArchive(snapshot.archiveYoung, current.archiveYoung),
+    archiveOld: foldArchive(snapshot.archiveOld, current.archiveOld),
   };
 };

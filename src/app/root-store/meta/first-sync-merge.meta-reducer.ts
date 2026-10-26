@@ -24,6 +24,26 @@ import { TIME_TRACKING_FEATURE_KEY } from '../../features/time-tracking/store/ti
 import { TimeTrackingState } from '../../features/time-tracking/time-tracking.model';
 import { GlobalConfigState } from '../../features/config/global-config.model';
 import { TODAY_TAG } from '../../features/tag/tag.const';
+import {
+  adapter as simpleCounterAdapter,
+  SIMPLE_COUNTER_FEATURE_NAME,
+} from '../../features/simple-counter/store/simple-counter.reducer';
+import {
+  METRIC_FEATURE_NAME,
+  metricAdapter,
+} from '../../features/metric/store/metric.reducer';
+import { REMINDER_FEATURE_NAME } from '../../features/reminder/store/reminder.reducer';
+import {
+  BOARDS_FEATURE_NAME,
+  BoardsState,
+} from '../../features/boards/store/boards.reducer';
+import {
+  plannerFeatureKey,
+  PlannerState,
+} from '../../features/planner/store/planner.reducer';
+import { PLUGIN_USER_DATA_FEATURE_NAME } from '../../plugins/store/plugin-user-data.reducer';
+import { PLUGIN_METADATA_FEATURE_NAME } from '../../plugins/store/plugin-metadata.reducer';
+import { menuTreeFeatureKey } from '../../features/menu-tree/store/menu-tree.reducer';
 
 type AnyState = Record<string, unknown>;
 
@@ -37,6 +57,18 @@ const setMany = <T extends { id: string }>(
   items.length && state[key]
     ? { ...state, [key]: adapter.setMany(items, state[key] as EntityState<T>) }
     : state;
+
+/** Upserts by ID into a plain array (replace in place, else append); never deletes. */
+const upsertById = <T extends { id: string }>(
+  cur: readonly T[],
+  items: readonly T[] | undefined,
+): T[] => {
+  if (!items?.length) return cur as T[];
+  const incoming = new Map(items.map((i) => [i.id, i]));
+  const out = cur.map((c) => incoming.get(c.id) ?? c);
+  const known = new Set(cur.map((c) => c.id));
+  return [...out, ...items.filter((i) => !known.has(i.id))];
+};
 
 const mergeTimeTracking = (
   cur: TimeTrackingState,
@@ -96,6 +128,48 @@ export const firstSyncMergeMetaReducer: MetaReducer = (
       issueProviderAdapter,
       payload.issueProviders,
     );
+
+    // fields below were added later: tolerate payloads without them
+    s = setMany(
+      s,
+      SIMPLE_COUNTER_FEATURE_NAME,
+      simpleCounterAdapter,
+      payload.simpleCounters ?? [],
+    );
+    s = setMany(s, METRIC_FEATURE_NAME, metricAdapter, payload.metrics ?? []);
+    const arraySlices = [
+      [REMINDER_FEATURE_NAME, payload.reminders],
+      [PLUGIN_USER_DATA_FEATURE_NAME, payload.pluginUserData],
+      [PLUGIN_METADATA_FEATURE_NAME, payload.pluginMetadata],
+    ] as const;
+    for (const [key, items] of arraySlices) {
+      const cur = s[key] as { id: string }[] | undefined;
+      if (cur && items?.length) {
+        s = { ...s, [key]: upsertById(cur, items) };
+      }
+    }
+    const boards = s[BOARDS_FEATURE_NAME] as BoardsState | undefined;
+    if (boards && payload.boardCfgs?.length) {
+      s = {
+        ...s,
+        [BOARDS_FEATURE_NAME]: {
+          ...boards,
+          boardCfgs: upsertById(boards.boardCfgs, payload.boardCfgs),
+        },
+      };
+    }
+    const planner = s[plannerFeatureKey] as PlannerState | undefined;
+    if (planner && payload.plannerDays && Object.keys(payload.plannerDays).length) {
+      const days = { ...planner.days };
+      for (const [day, ids] of Object.entries(payload.plannerDays)) {
+        const curIds = days[day] ?? [];
+        days[day] = [...curIds, ...ids.filter((id) => !curIds.includes(id))];
+      }
+      s = { ...s, [plannerFeatureKey]: { ...planner, days } };
+    }
+    if (payload.menuTree && s[menuTreeFeatureKey]) {
+      s = { ...s, [menuTreeFeatureKey]: payload.menuTree };
+    }
 
     // Archive-located time tracking is not split out: active entries are moved to
     // archiveYoung by the regular archive flush (sortTimeTrackingDataToArchiveYoung).

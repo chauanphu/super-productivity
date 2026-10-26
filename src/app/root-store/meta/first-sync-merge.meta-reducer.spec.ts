@@ -40,6 +40,14 @@ const emptyPayload = (): FirstSyncMergePayload => ({
   timeTracking: { project: {}, tag: {} },
   globalConfig: null,
   archiveTasks: [],
+  simpleCounters: [],
+  metrics: [],
+  reminders: [],
+  boardCfgs: [],
+  plannerDays: {},
+  pluginUserData: [],
+  pluginMetadata: [],
+  menuTree: null,
 });
 
 const localSync = {
@@ -188,6 +196,66 @@ describe('firstSyncMergeMetaReducer', () => {
       tag: { tag1: { '2026-01-04': { b: 1 } } },
     });
   });
+
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  it('upserts counters, metrics, reminders, boards, planner, plugins, menuTree', () => {
+    const base = {
+      ...createState(),
+      simpleCounter: { ids: ['c0'], entities: { c0: { id: 'c0', title: 'remote' } } },
+      metric: { ids: [], entities: {} },
+      reminders: [{ id: 'r0', relatedId: 'x', type: 'TASK', remindAt: 1, title: 'r0' }],
+      boards: { boardCfgs: [{ id: 'b0', title: 'remote', cols: 1, panels: [] }] },
+      planner: { days: { d1: ['a'] }, addPlannedTasksDialogLastShown: undefined },
+      pluginUserData: [{ id: 'u0', data: 'remote' }],
+      pluginMetadata: [],
+      menuTree: { projectTree: [], tagTree: [] },
+    } as unknown as State;
+    const tree = { projectTree: [{ k: 'project', id: 'A' }], tagTree: [] };
+    const payload = {
+      ...emptyPayload(),
+      simpleCounters: [{ id: 'c1', title: 'local' }],
+      metrics: [{ id: '2026-01-01' }],
+      reminders: [{ id: 'r1', relatedId: 'y', type: 'TASK', remindAt: 2, title: 'r1' }],
+      boardCfgs: [{ id: 'b1', title: 'local', cols: 2, panels: [] }],
+      plannerDays: { d1: ['b'], d2: ['c'] },
+      pluginUserData: [{ id: 'u1', data: 'local' }],
+      pluginMetadata: [{ id: 'm1', isEnabled: true }],
+      menuTree: tree,
+    } as unknown as FirstSyncMergePayload;
+    const r = apply(base, payload) as unknown as Record<string, any>;
+    expect(r.simpleCounter.ids).toEqual(['c0', 'c1']);
+    expect(r.metric.ids).toEqual(['2026-01-01']);
+    expect(r.reminders.map((x: { id: string }) => x.id)).toEqual(['r0', 'r1']);
+    expect(r.boards.boardCfgs.map((x: { id: string }) => x.id)).toEqual(['b0', 'b1']);
+    expect(r.planner.days).toEqual({ d1: ['a', 'b'], d2: ['c'] });
+    expect(r.pluginUserData.map((x: { id: string }) => x.id)).toEqual(['u0', 'u1']);
+    expect(r.pluginMetadata.map((x: { id: string }) => x.id)).toEqual(['m1']);
+    expect(r.menuTree).toEqual(tree);
+    // idempotent and never deleting
+    const again = apply(r as unknown as State, payload) as unknown as Record<string, any>;
+    expect(again.planner.days).toEqual(r.planner.days);
+    expect(again.reminders.length).toBe(2);
+    expect(again.boards.boardCfgs.length).toBe(2);
+  });
+
+  it('tolerates payloads without the newer fields', () => {
+    const old = { ...emptyPayload() } as Partial<FirstSyncMergePayload>;
+    for (const k of [
+      'simpleCounters',
+      'metrics',
+      'reminders',
+      'boardCfgs',
+      'plannerDays',
+      'pluginUserData',
+      'pluginMetadata',
+      'menuTree',
+    ] as const) {
+      delete old[k];
+    }
+    const state = createState();
+    expect(() => apply(state, old as FirstSyncMergePayload)).not.toThrow();
+  });
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 
   it('is idempotent (replay safe)', () => {
     const payload: FirstSyncMergePayload = {
