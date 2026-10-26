@@ -69,22 +69,49 @@ describe('password login', () => {
     await expect(loginWithPassword('a@b.com', pw)).rejects.toThrow('Invalid credentials');
   });
 
-  it('locks on the 5th consecutive failure', async () => {
+  it('increments atomically and locks when the returned count reaches 5', async () => {
     mockUser.findUnique.mockResolvedValue(row({ failedLoginAttempts: 4 }));
+    mockUser.update.mockResolvedValueOnce({ failedLoginAttempts: 5 });
     await expect(loginWithPassword('a@b.com', 'bad')).rejects.toThrow(
       'Invalid credentials',
     );
-    const data = mockUser.update.mock.calls[0][0].data;
-    expect(data.failedLoginAttempts).toBe(5);
-    expect(Number(data.lockedUntil)).toBeGreaterThan(Date.now());
+    expect(mockUser.update.mock.calls[0][0].data).toEqual({
+      failedLoginAttempts: { increment: 1 },
+    });
+    const lock = mockUser.update.mock.calls[1][0].data;
+    expect(Number(lock.lockedUntil)).toBeGreaterThan(Date.now());
   });
 
-  it('does not lock before the 5th failure', async () => {
+  it('does not lock while the returned count is below 5', async () => {
     mockUser.findUnique.mockResolvedValue(row({ failedLoginAttempts: 1 }));
+    mockUser.update.mockResolvedValueOnce({ failedLoginAttempts: 2 });
     await expect(loginWithPassword('a@b.com', 'bad')).rejects.toThrow();
-    const data = mockUser.update.mock.calls[0][0].data;
-    expect(data.failedLoginAttempts).toBe(2);
-    expect(data.lockedUntil).toBeUndefined();
+    expect(mockUser.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('after lock expiry the first wrong guess restarts the counter and does not re-lock', async () => {
+    mockUser.findUnique.mockResolvedValue(
+      row({ failedLoginAttempts: 5, lockedUntil: BigInt(Date.now() - 1000) }),
+    );
+    mockUser.update.mockResolvedValueOnce({ failedLoginAttempts: 1 });
+    await expect(loginWithPassword('a@b.com', 'bad')).rejects.toThrow(
+      'Invalid credentials',
+    );
+    expect(mockUser.update).toHaveBeenCalledTimes(1);
+    expect(mockUser.update.mock.calls[0][0].data).toEqual({
+      failedLoginAttempts: 1,
+      lockedUntil: null,
+    });
+  });
+
+  it('a wrong password on a locked account does not touch the lock', async () => {
+    mockUser.findUnique.mockResolvedValue(
+      row({ failedLoginAttempts: 5, lockedUntil: BigInt(Date.now() + 60_000) }),
+    );
+    await expect(loginWithPassword('a@b.com', 'bad')).rejects.toThrow(
+      'Invalid credentials',
+    );
+    expect(mockUser.update).not.toHaveBeenCalled();
   });
 
   it('rejects while locked even with the right password', async () => {

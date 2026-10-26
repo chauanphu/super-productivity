@@ -408,16 +408,21 @@ export const loginWithPassword = async (
 
   if (!user || !passwordOk || user.isVerified !== 1 || locked) {
     if (user && user.isVerified === 1 && !locked) {
-      const attempts = (user.failedLoginAttempts ?? 0) + 1;
-      await prisma.user.update({
+      // An expired lock restarts the counter; otherwise increment atomically.
+      const lockExpired = !!user.lockedUntil;
+      const updated = await prisma.user.update({
         where: { id: user.id },
-        data: {
-          failedLoginAttempts: attempts,
-          ...(attempts >= MAX_FAILED_LOGIN_ATTEMPTS && {
-            lockedUntil: BigInt(Date.now() + LOGIN_LOCK_DURATION_MS),
-          }),
-        },
+        data: lockExpired
+          ? { failedLoginAttempts: 1, lockedUntil: null }
+          : { failedLoginAttempts: { increment: 1 } },
+        select: { failedLoginAttempts: true },
       });
+      if (updated.failedLoginAttempts >= MAX_FAILED_LOGIN_ATTEMPTS) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { lockedUntil: BigInt(Date.now() + LOGIN_LOCK_DURATION_MS) },
+        });
+      }
     }
     throw new Error('Invalid credentials');
   }
