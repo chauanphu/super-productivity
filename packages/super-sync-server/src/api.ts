@@ -178,9 +178,12 @@ export const apiRoutes = async (fastify: FastifyInstance): Promise<void> => {
         const { email, password } = parseResult.data;
         return reply.send(await loginWithPassword(email, password));
       } catch (err) {
-        return reply
-          .status(401)
-          .send({ error: getSafeErrorMessage(err, 'Invalid credentials') });
+        if (err instanceof Error && err.message === 'Invalid credentials') {
+          return reply.status(401).send({ error: 'Invalid credentials' });
+        }
+        const errMsg = err instanceof Error ? err.message : 'Unknown error';
+        Logger.error(`Password login error: ${errMsg}`);
+        return reply.status(500).send({ error: 'Login failed. Please try again.' });
       }
     },
   );
