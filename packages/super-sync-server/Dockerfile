@@ -29,8 +29,31 @@ WORKDIR /repo/packages/super-sync-server
 RUN npx prisma generate
 RUN rm -rf dist && npm run build
 
-# ---- Runtime stage ----
-FROM node:24-alpine AS production
+# ---- Web app builder (only built for --target planner) ----
+# Debian base: the Angular toolchain's native deps; node:24 ships npm 11 (npm 10 crashes on
+# this lockfile with "Cannot read properties of null (reading 'edgesOut')").
+FROM node:24 AS web
+
+WORKDIR /repo
+ENV NODE_OPTIONS=--max-old-space-size=6144
+
+# npm ci needs every workspace manifest listed by root "workspaces": ["packages/*"]
+COPY package.json package-lock.json tsconfig.json ./
+COPY packages/plugin-api/ ./packages/plugin-api/
+COPY packages/shared-schema/ ./packages/shared-schema/
+COPY packages/plugin-dev/package.json ./packages/plugin-dev/
+COPY packages/vite-plugin/package.json ./packages/vite-plugin/
+COPY packages/super-sync-server/package.json ./packages/super-sync-server/
+COPY tools/ ./tools/
+RUN npm ci --ignore-scripts && npm run prepare
+
+COPY . .
+# Default environment.prod.ts: superSyncBaseUrl '' (same origin), isLoginRequired true.
+# Output: dist/browser
+RUN npm run buildFrontend:prodWeb
+
+# ---- Runtime base ----
+FROM node:24-alpine AS runtime
 
 # System deps for Prisma & healthcheck + create user BEFORE copying files
 RUN apk add --no-cache openssl libc6-compat wget && \
@@ -71,3 +94,15 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT}/health || exit 1
 
 CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/index.js"]
+
+# ---- planner: server + Angular app on one origin (docker-compose.planner.yml) ----
+FROM runtime AS planner
+COPY --from=web --chown=supersync:nodejs /repo/dist/browser /app/web
+ENV WEB_ROOT=/app/web
+# No outbound calls at runtime: Prisma CLI update checks and npm update notices
+ENV CHECKPOINT_DISABLE=1 NPM_CONFIG_UPDATE_NOTIFIER=false
+# Also handles an empty database (no initial migration exists; see the script)
+CMD ["sh", "scripts/docker-start.sh"]
+
+# ---- Default target (last stage): server only, as before ----
+FROM runtime AS production

@@ -1,0 +1,58 @@
+# planner.captechvn.com: SuperSync server + the Angular app on one origin, plus Postgres.
+# No external services. TLS is done by nginx-proxy-manager in front of `app`.
+#
+#   cp .env.planner.example .env.planner   # fill in secrets
+#   docker compose -f docker-compose.planner.yml --env-file .env.planner up -d --build
+#   docker compose -f docker-compose.planner.yml --env-file .env.planner exec app \
+#     node dist/scripts/set-password.js you@example.com
+#
+# See packages/super-sync-server/README.md "Deploying at planner.captechvn.com".
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-planner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-planner}
+    volumes:
+      - planner-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: packages/super-sync-server/Dockerfile
+      target: planner
+    image: planner:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-planner}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-planner}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (openssl rand -hex 32)}
+      PUBLIC_URL: ${PUBLIC_URL:-https://planner.captechvn.com}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://planner.captechvn.com}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
+      REGISTRATION_DISABLED: ${REGISTRATION_DISABLED:-true}
+      WEB_ROOT: /app/web
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-planner.captechvn.com}
+      WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN:-https://planner.captechvn.com}
+    volumes:
+      - planner-data:/app/data
+    # Loopback only: reachable by an NPM on the same host network, never from the internet.
+    # If NPM runs in Docker, attach it to this project's network and forward to app:1900.
+    ports:
+      - '127.0.0.1:${APP_PORT:-1900}:1900'
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  planner-db:
+  planner-data:

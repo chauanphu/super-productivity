@@ -12,3 +12,9 @@ backup
 coverage
 e2e-results
 tmp
+**/node_modules
+# Never send env files into the build: tools/load-env.js copies .env into the JS bundle
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.planner.example
