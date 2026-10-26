@@ -176,6 +176,14 @@
               "extractLicenses": true,
               "serviceWorker": false
             },
+            "e2e": {
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.e2e.ts"
+                }
+              ]
+            },
             "stageWeb": {
               "outputPath": {
                 "base": "dist",
@@ -222,6 +230,9 @@
             },
             "development": {
               "buildTarget": "sp2:build:development"
+            },
+            "e2e": {
+              "buildTarget": "sp2:build:development,e2e"
             }
           },
           "defaultConfiguration": "development"

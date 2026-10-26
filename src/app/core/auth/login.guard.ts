@@ -1,9 +1,10 @@
 import { inject, Injectable } from '@angular/core';
 import { Router, UrlTree } from '@angular/router';
 import { SuperSyncAuthService } from '../../op-log/sync-providers/super-sync/super-sync-auth.service';
+import { environment } from '../../../environments/environment';
 
-// Single switch for the mandatory login gate.
-export const IS_LOGIN_REQUIRED = true;
+// Single switch for the mandatory login gate (build-time; false only in the e2e build).
+export const IS_LOGIN_REQUIRED: boolean = environment.isLoginRequired;
 
 @Injectable({ providedIn: 'root' })
 export class LoginGuard {

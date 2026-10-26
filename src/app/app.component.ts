@@ -34,7 +34,7 @@ import { LanguageService } from './core/language/language.service';
 import { WorkContextService } from './features/work-context/work-context.service';
 import { SyncTriggerService } from './imex/sync/sync-trigger.service';
 import { ActivatedRoute, NavigationEnd, Router, RouterOutlet } from '@angular/router';
-import { isLoginUrl } from './core/auth/login.guard';
+import { IS_LOGIN_REQUIRED, isLoginUrl } from './core/auth/login.guard';
 import { concatMap, filter, first, map, startWith, take } from 'rxjs/operators';
 
 import { IS_MOBILE } from './util/is-mobile';
@@ -190,11 +190,12 @@ export class AppComponent implements OnDestroy, AfterViewInit {
 
   private _router = inject(Router);
   // On the logged-out gate page only the login form is rendered (no app shell, no onboarding).
+  // Without the gate (e2e build) the shell behaves as before the gate existed.
   readonly isLoginRoute = toSignal(
     this._router.events.pipe(
       filter((e): e is NavigationEnd => e instanceof NavigationEnd),
-      map((e) => isLoginUrl(e.urlAfterRedirects)),
-      startWith(isLoginUrl(this._router.url)),
+      map((e) => IS_LOGIN_REQUIRED && isLoginUrl(e.urlAfterRedirects)),
+      startWith(IS_LOGIN_REQUIRED && isLoginUrl(this._router.url)),
     ),
     { requireSync: true },
   );
