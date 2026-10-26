@@ -6,6 +6,7 @@ import { randomBytes } from 'crypto';
 import { sendLoginMagicLinkEmail, sendVerificationEmail } from './email';
 import { loadConfigFromEnv } from './config';
 import { Prisma } from '@prisma/client';
+import { verifyPassword } from './password';
 
 // Auth constants
 const MIN_JWT_SECRET_LENGTH = 32;
@@ -18,6 +19,9 @@ export const JWT_EXPIRY = '365d';
 export const VERIFICATION_TOKEN_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 export const MAX_VERIFICATION_RESEND_COUNT = 20;
 const LOGIN_MAGIC_LINK_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
+
+export const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+export const LOGIN_LOCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 
 export const getJwtSecret = (): string => {
   const secret = process.env.JWT_SECRET;
@@ -36,6 +40,13 @@ export const getJwtSecret = (): string => {
 };
 
 const JWT_SECRET = getJwtSecret();
+
+export const signAuthToken = (
+  userId: number,
+  email: string,
+  tokenVersion: number,
+): string =>
+  jwt.sign({ userId, email, tokenVersion }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
 
 export const verifyEmail = async (token: string): Promise<boolean> => {
   const user = await prisma.user.findFirst({
@@ -98,9 +109,7 @@ export const replaceToken = async (
     return user.tokenVersion;
   });
 
-  const token = jwt.sign({ userId, email, tokenVersion: newTokenVersion }, JWT_SECRET, {
-    expiresIn: JWT_EXPIRY,
-  });
+  const token = signAuthToken(userId, email, newTokenVersion);
 
   Logger.info(`Token replaced for user ${userId} (new version: ${newTokenVersion})`);
 
@@ -168,7 +177,8 @@ export const verifyToken = async (token: string): Promise<TokenVerificationResul
     if (err instanceof JsonWebTokenError) {
       return { valid: false, reason: 'Invalid token' };
     }
-    const errMsg = err instanceof Error ? `[${err.name}] ${err.message}` : 'non-Error value';
+    const errMsg =
+      err instanceof Error ? `[${err.name}] ${err.message}` : 'non-Error value';
     Logger.error(`Token verification failed due to unexpected error: ${errMsg}`);
     throw err;
   }
@@ -264,11 +274,7 @@ export const verifyLoginMagicLink = async (
   });
 
   const tokenVersion = user.tokenVersion ?? 0;
-  const jwtToken = jwt.sign(
-    { userId: user.id, email: user.email, tokenVersion },
-    JWT_SECRET,
-    { expiresIn: JWT_EXPIRY },
-  );
+  const jwtToken = signAuthToken(user.id, user.email, tokenVersion);
 
   Logger.info(`User logged in via magic link (ID: ${user.id})`);
 
@@ -383,4 +389,52 @@ export const registerWithMagicLink = async (
     }
     throw err;
   }
+};
+
+/**
+ * Login with email + password. Every failure (unknown user, no password set,
+ * unverified, wrong password, locked) throws the same error and costs one bcrypt compare.
+ */
+export const loginWithPassword = async (
+  email: string,
+  password: string,
+): Promise<{ token: string; user: { id: number; email: string } }> => {
+  const user = await prisma.user.findUnique({
+    where: { email: email.trim().toLowerCase() },
+  });
+
+  const passwordOk = await verifyPassword(password, user?.passwordHash ?? null);
+  const locked = !!user?.lockedUntil && user.lockedUntil > BigInt(Date.now());
+
+  if (!user || !passwordOk || user.isVerified !== 1 || locked) {
+    if (user && user.isVerified === 1 && !locked) {
+      // An expired lock restarts the counter; otherwise increment atomically.
+      const lockExpired = !!user.lockedUntil;
+      const updated = await prisma.user.update({
+        where: { id: user.id },
+        data: lockExpired
+          ? { failedLoginAttempts: 1, lockedUntil: null }
+          : { failedLoginAttempts: { increment: 1 } },
+        select: { failedLoginAttempts: true },
+      });
+      if (updated.failedLoginAttempts >= MAX_FAILED_LOGIN_ATTEMPTS) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { lockedUntil: BigInt(Date.now() + LOGIN_LOCK_DURATION_MS) },
+        });
+      }
+    }
+    throw new Error('Invalid credentials');
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { failedLoginAttempts: 0, lockedUntil: null },
+  });
+
+  Logger.info(`User logged in via password (ID: ${user.id})`);
+  return {
+    token: signAuthToken(user.id, user.email, user.tokenVersion ?? 0),
+    user: { id: user.id, email: user.email },
+  };
 };

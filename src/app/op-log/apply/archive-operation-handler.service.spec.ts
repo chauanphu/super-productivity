@@ -15,6 +15,9 @@ import { TimeTrackingService } from '../../features/time-tracking/time-tracking.
 import { loadAllData } from '../../root-store/meta/load-all-data.action';
 import { ArchiveDbAdapter } from '../../core/persistence/archive-db-adapter.service';
 import { OpType } from '../core/operation.types';
+import { applyFirstSyncMerge } from '../../root-store/meta/first-sync-merge.actions';
+import { TaskCopy } from '../../features/tasks/task.model';
+import { FirstSyncMergePayload } from '../sync/first-sync-merge/first-sync-merge';
 
 describe('isArchiveAffectingAction', () => {
   it('should return true for moveToArchive action', () => {
@@ -478,6 +481,104 @@ describe('ArchiveOperationHandler', () => {
     // Note: flushYoungToOld tests require module mocking which is complex in Jasmine.
     // The core functionality is tested through integration tests.
     // These tests verify the handler recognizes the action type.
+    describe('applyFirstSyncMerge action', () => {
+      const payloadWith = (archiveTasks: TaskCopy[]): FirstSyncMergePayload => ({
+        projects: [],
+        tasks: [],
+        tags: [],
+        notes: [],
+        taskRepeatCfgs: [],
+        issueProviders: [],
+        timeTracking: { project: {}, tag: {} },
+        globalConfig: null,
+        archiveTasks,
+        simpleCounters: [],
+        metrics: [],
+        reminders: [],
+        boardCfgs: [],
+        plannerDays: {},
+        pluginUserData: [],
+        pluginMetadata: [],
+        menuTree: null,
+      });
+      const actionWith = (
+        archiveTasks: TaskCopy[],
+        isRemote: boolean,
+      ): PersistentAction => {
+        const a = applyFirstSyncMerge({ payload: payloadWith(archiveTasks) });
+        return { ...a, meta: { ...a.meta, isRemote } } as PersistentAction;
+      };
+      let young: ArchiveModel;
+
+      beforeEach(() => {
+        young = {
+          ...createEmptyArchiveModel(),
+          task: { ids: ['b'], entities: { b: createMockTask('b') } },
+        };
+        mockArchiveDbAdapter.loadArchiveYoung.and.callFake(() => Promise.resolve(young));
+        mockArchiveDbAdapter.saveArchiveYoung.and.callFake((a: ArchiveModel) => {
+          young = a;
+          return Promise.resolve();
+        });
+      });
+
+      const tasks = (): TaskCopy[] => [
+        createMockTask('c') as TaskCopy,
+        { ...createMockTask('b'), title: 'new b' } as TaskCopy,
+      ];
+
+      it('does nothing for a local dispatch (caller writes before dispatch)', async () => {
+        await service.handleOperation(actionWith(tasks(), false));
+        expect(mockArchiveDbAdapter.saveArchiveYoung).not.toHaveBeenCalled();
+      });
+
+      it('upserts archiveTasks into archiveYoung for remote replay, idempotent', async () => {
+        const action = actionWith(tasks(), true);
+        await service.handleOperation(action);
+        const once = young;
+        await service.handleOperation(action);
+        expect(once.task.ids).toEqual(['b', 'c']);
+        expect(once.task.entities['b']!.title).toBe('new b');
+        expect(young).toEqual(once);
+      });
+
+      describe('writeFirstSyncMergeArchive', () => {
+        it('upserts, sorts ids and is idempotent', async () => {
+          await service.writeFirstSyncMergeArchive(payloadWith(tasks()));
+          const once = young;
+          await service.writeFirstSyncMergeArchive(payloadWith(tasks()));
+          expect(once.task.ids).toEqual(['b', 'c']);
+          expect(once.task.entities['b']!.title).toBe('new b');
+          expect(young).toEqual(once);
+        });
+
+        it('skips tasks already in archiveOld but writes the others', async () => {
+          mockArchiveDbAdapter.loadArchiveOld.and.returnValue(
+            Promise.resolve({
+              ...createEmptyArchiveModel(),
+              task: { ids: ['o'], entities: { o: createMockTask('o') } },
+            }),
+          );
+          await service.writeFirstSyncMergeArchive(
+            payloadWith([
+              createMockTask('o') as TaskCopy,
+              createMockTask('n') as TaskCopy,
+            ]),
+          );
+          expect(young.task.ids).toEqual(['b', 'n']);
+        });
+
+        it('propagates write errors to the caller', async () => {
+          mockArchiveDbAdapter.saveArchiveYoung.and.returnValue(
+            Promise.reject(new Error('quota')),
+          );
+          await expectAsync(
+            service.writeFirstSyncMergeArchive(payloadWith(tasks())),
+          ).toBeRejectedWithError('quota');
+        });
+      });
+    });
+
     describe('flushYoungToOld action', () => {
       it('should recognize the flushYoungToOld action type', async () => {
         const timestamp = Date.now();

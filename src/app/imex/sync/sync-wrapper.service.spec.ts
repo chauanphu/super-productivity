@@ -34,9 +34,12 @@ import {
   UploadRevToMatchMismatchAPIError,
 } from '../../op-log/core/errors/sync-errors';
 import { MAX_LWW_REUPLOAD_RETRIES } from '../../op-log/core/operation-log.const';
+import { FirstSyncMergeService } from '../../op-log/sync/first-sync-merge/first-sync-merge.service';
 
+import { setLocalDataWipeInProgress } from '../../op-log/persistence/local-data-wipe-state';
 describe('SyncWrapperService', () => {
   let service: SyncWrapperService;
+  let mockFirstSyncMerge: jasmine.SpyObj<FirstSyncMergeService>;
   let mockProviderManager: jasmine.SpyObj<SyncProviderManager>;
   let mockSyncService: jasmine.SpyObj<OperationLogSyncService>;
   let mockWrappedProvider: jasmine.SpyObj<WrappedProviderService>;
@@ -191,9 +194,13 @@ describe('SyncWrapperService', () => {
       'stop',
     ]);
 
+    mockFirstSyncMerge = jasmine.createSpyObj('FirstSyncMergeService', ['runIfNeeded']);
+    mockFirstSyncMerge.runIfNeeded.and.resolveTo('SKIPPED');
+
     TestBed.configureTestingModule({
       providers: [
         SyncWrapperService,
+        { provide: FirstSyncMergeService, useValue: mockFirstSyncMerge },
         { provide: SyncProviderManager, useValue: mockProviderManager },
         { provide: OperationLogSyncService, useValue: mockSyncService },
         { provide: WrappedProviderService, useValue: mockWrappedProvider },
@@ -415,6 +422,87 @@ describe('SyncWrapperService', () => {
       expect(result).toBe(SyncStatus.InSync);
       expect(mockSyncService.downloadRemoteOps).not.toHaveBeenCalled();
       expect(mockSyncService.uploadPendingOps).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('_sync() - First-sync merge trigger', () => {
+    it('runs the first-sync merge before downloading for SuperSync', async () => {
+      configSubject.next(createMockSyncConfig(SyncProviderId.SuperSync));
+      mockFirstSyncMerge.runIfNeeded.and.callFake(async () => {
+        expect(mockSyncService.downloadRemoteOps).not.toHaveBeenCalled();
+        return 'MERGED';
+      });
+
+      const result = await service.sync();
+
+      expect(mockFirstSyncMerge.runIfNeeded).toHaveBeenCalledTimes(1);
+      // merge is followed by the normal sync (download + upload)
+      expect(mockSyncService.downloadRemoteOps).toHaveBeenCalled();
+      expect(mockSyncService.uploadPendingOps).toHaveBeenCalled();
+      expect(result).toBe(SyncStatus.InSync);
+    });
+
+    it('does not run the first-sync merge for other providers', async () => {
+      configSubject.next(createMockSyncConfig(SyncProviderId.WebDAV));
+
+      await service.sync();
+
+      expect(mockFirstSyncMerge.runIfNeeded).not.toHaveBeenCalled();
+      expect(mockSyncService.downloadRemoteOps).toHaveBeenCalled();
+    });
+
+    it('keeps the old cancel behaviour when the merge is cancelled', async () => {
+      configSubject.next(createMockSyncConfig(SyncProviderId.SuperSync));
+      mockFirstSyncMerge.runIfNeeded.and.resolveTo('CANCELLED');
+
+      const result = await service.sync();
+
+      expect(result).toBe('HANDLED_ERROR');
+      expect(mockSnackService.open).toHaveBeenCalledWith({
+        msg: T.F.SYNC.S.LOCAL_DATA_REPLACE_CANCELLED,
+      });
+      expect(mockSyncService.downloadRemoteOps).not.toHaveBeenCalled();
+      expect(mockSyncService.uploadPendingOps).not.toHaveBeenCalled();
+    });
+
+    it('E2E mismatch: no cancel snackbar on top of the error, no normal sync', async () => {
+      configSubject.next(createMockSyncConfig(SyncProviderId.SuperSync));
+      mockFirstSyncMerge.runIfNeeded.and.resolveTo('E2E_MISMATCH');
+
+      const result = await service.sync();
+
+      expect(result).toBe('HANDLED_ERROR');
+      expect(mockSnackService.open).not.toHaveBeenCalled();
+      expect(mockSyncService.downloadRemoteOps).not.toHaveBeenCalled();
+    });
+
+    it('surfaces merge errors and skips the normal sync', async () => {
+      configSubject.next(createMockSyncConfig(SyncProviderId.SuperSync));
+      mockFirstSyncMerge.runIfNeeded.and.rejectWith(new Error('archive write failed'));
+
+      const result = await service.sync();
+
+      expect(result).toBe('HANDLED_ERROR');
+      expect(mockSnackService.open).toHaveBeenCalledWith(
+        jasmine.objectContaining({ type: 'ERROR' }),
+      );
+      expect(mockSyncService.uploadPendingOps).not.toHaveBeenCalled();
+    });
+
+    it('cannot run twice for concurrent sync triggers', async () => {
+      configSubject.next(createMockSyncConfig(SyncProviderId.SuperSync));
+      let release!: () => void;
+      mockFirstSyncMerge.runIfNeeded.and.returnValue(
+        new Promise((r) => (release = () => r('MERGED'))),
+      );
+
+      const first = service.sync();
+      const second = await service.sync();
+      release();
+      await first;
+
+      expect(second).toBe('HANDLED_ERROR');
+      expect(mockFirstSyncMerge.runIfNeeded).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -1432,6 +1520,17 @@ describe('SyncWrapperService', () => {
   });
 
   describe('sync() with encryption operation blocking', () => {
+    it('stays blocked while a local data wipe runs (until the reload)', async () => {
+      setLocalDataWipeInProgress(true);
+      try {
+        expect(await service.sync()).toBe('HANDLED_ERROR');
+        expect(service.isEncryptionOperationInProgress).toBe(true);
+        expect(mockSyncService.uploadPendingOps).not.toHaveBeenCalled();
+      } finally {
+        setLocalDataWipeInProgress(false);
+      }
+    });
+
     it('should return HANDLED_ERROR when encryption operation is in progress', async () => {
       // Manually set the flag (simulating runWithSyncBlocked is active)
       service['_isEncryptionOperationInProgress$'].next(true);
@@ -1507,6 +1606,10 @@ describe('SyncWrapperService', () => {
       TestBed.configureTestingModule({
         providers: [
           SyncWrapperService,
+          {
+            provide: FirstSyncMergeService,
+            useValue: { runIfNeeded: () => Promise.resolve('SKIPPED') },
+          },
           { provide: SyncProviderManager, useValue: mockProviderManager },
           { provide: OperationLogSyncService, useValue: mockSyncService },
           { provide: WrappedProviderService, useValue: mockWrappedProvider },
@@ -1635,6 +1738,10 @@ describe('SyncWrapperService', () => {
       TestBed.configureTestingModule({
         providers: [
           SyncWrapperService,
+          {
+            provide: FirstSyncMergeService,
+            useValue: { runIfNeeded: () => Promise.resolve('SKIPPED') },
+          },
           { provide: SyncProviderManager, useValue: mockProviderManager },
           { provide: OperationLogSyncService, useValue: mockSyncService },
           { provide: WrappedProviderService, useValue: mockWrappedProvider },

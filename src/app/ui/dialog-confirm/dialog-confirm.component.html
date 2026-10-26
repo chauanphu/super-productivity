@@ -36,6 +36,16 @@
       </button>
     }
 
+    @if (data.extraTxt) {
+      <button
+        (click)="close('EXTRA')"
+        mat-button
+        type="button"
+      >
+        {{ data.extraTxt | translate }}
+      </button>
+    }
+
     <button
       tabindex="2"
       #confirmButton

@@ -10,7 +10,10 @@ import { WrappedProviderService } from '../sync-providers/wrapped-provider.servi
 import { WsTriggeredDownloadService } from './ws-triggered-download.service';
 import { AuthFailSPError, MissingCredentialsSPError } from '../sync-exports';
 
+import { FirstSyncMergeService } from './first-sync-merge/first-sync-merge.service';
+
 describe('WsTriggeredDownloadService', () => {
+  let isMergePending: boolean;
   let service: WsTriggeredDownloadService;
   let notification$: Subject<NewOpsNotification>;
   let mockWsService: Pick<SuperSyncWebSocketService, 'newOpsNotification$'>;
@@ -49,9 +52,14 @@ describe('WsTriggeredDownloadService', () => {
       Promise.resolve(syncCapableProvider as any),
     );
 
+    isMergePending = false;
     TestBed.configureTestingModule({
       providers: [
         WsTriggeredDownloadService,
+        {
+          provide: FirstSyncMergeService,
+          useValue: { isFirstSyncMergePendingOrRequired: () => isMergePending },
+        },
         { provide: SuperSyncWebSocketService, useValue: mockWsService },
         { provide: OperationLogSyncService, useValue: mockSyncService },
         { provide: SyncProviderManager, useValue: mockProviderManager },
@@ -108,6 +116,16 @@ describe('WsTriggeredDownloadService', () => {
     flushMicrotasks();
 
     expect(mockWrappedProvider.getOperationSyncCapable).not.toHaveBeenCalled();
+    expect(mockSyncService.downloadRemoteOps).not.toHaveBeenCalled();
+  }));
+
+  it('should skip downloads while the first-sync merge is pending or required', fakeAsync(() => {
+    isMergePending = true;
+    service.start();
+    notification$.next({ latestSeq: 3 });
+    tick(500);
+    flushMicrotasks();
+
     expect(mockSyncService.downloadRemoteOps).not.toHaveBeenCalled();
   }));
 

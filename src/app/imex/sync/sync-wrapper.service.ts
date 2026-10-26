@@ -75,6 +75,8 @@ import { OperationLogStoreService } from '../../op-log/persistence/operation-log
 import { OperationLogSyncService } from '../../op-log/sync/operation-log-sync.service';
 import { WrappedProviderService } from '../../op-log/sync-providers/wrapped-provider.service';
 import { SuperSyncProvider } from '../../op-log/sync-providers/super-sync/super-sync';
+import { FirstSyncMergeService } from '../../op-log/sync/first-sync-merge/first-sync-merge.service';
+import { isLocalDataWipeInProgress } from '../../op-log/persistence/local-data-wipe-state';
 
 @Injectable({
   providedIn: 'root',
@@ -95,6 +97,7 @@ export class SyncWrapperService {
   private _opLogStore = inject(OperationLogStoreService);
   private _opLogSyncService = inject(OperationLogSyncService);
   private _wrappedProvider = inject(WrappedProviderService);
+  private _firstSyncMerge = inject(FirstSyncMergeService);
 
   syncState$ = this._providerManager.syncStatus$;
 
@@ -191,7 +194,10 @@ export class SyncWrapperService {
    * Used by ImmediateUploadService to avoid uploading during critical encryption operations.
    */
   get isEncryptionOperationInProgress(): boolean {
-    return this._isEncryptionOperationInProgress$.getValue();
+    // A local data wipe keeps syncs blocked until its reload (ImmediateUpload reads this too).
+    return (
+      this._isEncryptionOperationInProgress$.getValue() || isLocalDataWipeInProgress()
+    );
   }
 
   /**
@@ -235,8 +241,8 @@ export class SyncWrapperService {
 
   async sync(): Promise<SyncStatus | 'HANDLED_ERROR'> {
     // Block sync if encryption operation is in progress (password change, enable/disable)
-    if (this._isEncryptionOperationInProgress$.getValue()) {
-      SyncLog.log('Sync blocked: encryption operation in progress');
+    if (this.isEncryptionOperationInProgress) {
+      SyncLog.log('Sync blocked: encryption operation or local data wipe in progress');
       return 'HANDLED_ERROR';
     }
 
@@ -385,6 +391,23 @@ export class SyncWrapperService {
       if (!syncCapableProvider) {
         SyncLog.warn('SyncWrapperService: Provider does not support operation sync');
         return SyncStatus.InSync;
+      }
+
+      // SuperSync first login of a device with data: merge it into the account by ID
+      // (or resume a merge interrupted by a crash), then continue with the normal sync.
+      // Runs inside sync()'s in-progress guard, so it cannot run twice concurrently.
+      if (providerId === SyncProviderId.SuperSync) {
+        const mergeResult = await this._firstSyncMerge.runIfNeeded(syncCapableProvider);
+        if (mergeResult === 'CANCELLED') {
+          this._snackService.open({ msg: T.F.SYNC.S.LOCAL_DATA_REPLACE_CANCELLED });
+          this._providerManager.setSyncStatus('UNKNOWN_OR_CHANGED');
+          return 'HANDLED_ERROR';
+        }
+        if (mergeResult === 'E2E_MISMATCH') {
+          // the service already showed the error snackbar
+          this._providerManager.setSyncStatus('ERROR');
+          return 'HANDLED_ERROR';
+        }
       }
 
       // Perform actual sync: download first, then upload

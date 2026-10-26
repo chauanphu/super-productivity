@@ -13,6 +13,7 @@ import {
   OnDestroy,
   signal,
   ViewChild,
+  viewChild,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ShortcutService } from './core-ui/shortcut/shortcut.service';
@@ -32,8 +33,9 @@ import { GlobalThemeService } from './core/theme/global-theme.service';
 import { LanguageService } from './core/language/language.service';
 import { WorkContextService } from './features/work-context/work-context.service';
 import { SyncTriggerService } from './imex/sync/sync-trigger.service';
-import { ActivatedRoute, RouterOutlet } from '@angular/router';
-import { concatMap, first, take } from 'rxjs/operators';
+import { ActivatedRoute, NavigationEnd, Router, RouterOutlet } from '@angular/router';
+import { IS_LOGIN_REQUIRED, isLoginUrl } from './core/auth/login.guard';
+import { concatMap, filter, first, map, startWith, take } from 'rxjs/operators';
 
 import { IS_MOBILE } from './util/is-mobile';
 import { recordSearchNavDebug } from './util/search-nav-debug';
@@ -146,6 +148,8 @@ export class AppComponent implements OnDestroy, AfterViewInit {
   readonly T = T;
   readonly isShowMobileButtonNav = this.layoutService.isShowMobileBottomNav;
 
+  readonly magicSideNav = viewChild(MagicSideNavComponent);
+
   @ViewChild('routeWrapper', { read: ElementRef }) routeWrapper?: ElementRef<HTMLElement>;
 
   @HostBinding('class.isWorkViewScrolled') get isWorkViewScrolledClass(): boolean {
@@ -182,6 +186,18 @@ export class AppComponent implements OnDestroy, AfterViewInit {
   private readonly _activeWorkContext = toSignal(
     this.workContextService.activeWorkContext$,
     { initialValue: null },
+  );
+
+  private _router = inject(Router);
+  // On the logged-out gate page only the login form is rendered (no app shell, no onboarding).
+  // Without the gate (e2e build) the shell behaves as before the gate existed.
+  readonly isLoginRoute = toSignal(
+    this._router.events.pipe(
+      filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+      map((e) => IS_LOGIN_REQUIRED && isLoginUrl(e.urlAfterRedirects)),
+      startWith(IS_LOGIN_REQUIRED && isLoginUrl(this._router.url)),
+    ),
+    { requireSync: true },
   );
 
   isShowOnboardingPresets = signal(
@@ -419,6 +435,7 @@ export class AppComponent implements OnDestroy, AfterViewInit {
       };
 
       const onKeyDown = (ev: KeyboardEvent): void => {
+        if (this.isLoginRoute()) return;
         this._ngZone.run(() => {
           void this._shortcutService.handleKeyDown(ev);
         });

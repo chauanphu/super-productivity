@@ -180,6 +180,18 @@ In Super Productivity, configure the Custom Sync provider with:
 The server includes scripts for administrative tasks. These use the configured database.
 
 ```bash
+# Create a user or set/reset a password (10 chars to 72 bytes; user is marked verified).
+# Run `pg_dump` before deploying a new version.
+# Development (ts-node):
+npm run set-password -- user@example.com 'a-long-password'
+# Production container (dev dependencies are not installed, use the compiled script):
+node dist/scripts/set-password.js user@example.com 'a-long-password'
+# Keep the password out of `ps` and shell history: omit it and pass it via the env:
+SET_PASSWORD_PASSWORD='a-long-password' node dist/scripts/set-password.js user@example.com
+# Reset a compromised password AND log out every existing session (bumps tokenVersion;
+# without the flag existing tokens stay valid):
+SET_PASSWORD_PASSWORD='a-new-password' node dist/scripts/set-password.js --revoke-sessions user@example.com
+
 # Delete a user account
 npm run delete-user -- user@example.com
 
@@ -292,6 +304,10 @@ When deploying multiple server instances behind a load balancer, be aware of the
 ### Single-Instance Deployment
 
 For single-instance deployments, these limitations do not apply. The current implementation is fully functional and well-tested for single-instance use.
+
+## Known Limitations
+
+- **First-sync merge and server snapshots**: the client's first-login merge of local data into an existing account is uploaded as `applyFirstSyncMerge` operations. Server-side snapshot generation (restore points, `GET /api/sync/snapshot`) does not replay these operations, so data that only arrived through such a merge is missing from server-built snapshots.
 
 ## Security Notes
 

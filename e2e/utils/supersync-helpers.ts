@@ -31,6 +31,9 @@ import {
 export const SUPERSYNC_BASE_URL =
   process.env.SUPERSYNC_E2E_URL || 'http://localhost:1901';
 
+/** Account password of every test user (create-user keeps it for existing users). */
+export const TEST_USER_PASSWORD = 'TestPassword123!';
+
 /**
  * Test user credentials returned from the server.
  */
@@ -64,7 +67,7 @@ export const createTestUser = async (
   maxRetries = 3,
 ): Promise<TestUser> => {
   const email = `test-${testId}@e2e.local`;
-  const password = 'TestPassword123!';
+  const password = TEST_USER_PASSWORD;
 
   const headers = new Headers();
   headers.set('Content-Type', 'application/json');
@@ -179,7 +182,8 @@ export const isServerHealthy = async (): Promise<boolean> => {
 export const getSuperSyncConfig = (user: TestUser): SuperSyncConfig => {
   return {
     baseUrl: SUPERSYNC_BASE_URL,
-    accessToken: user.token,
+    email: user.email,
+    accountPassword: TEST_USER_PASSWORD,
     isEncryptionEnabled: true,
     password: 'e2e-default-encryption-pw',
   };

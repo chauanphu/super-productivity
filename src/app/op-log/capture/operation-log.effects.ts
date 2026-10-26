@@ -29,6 +29,12 @@ import { ImmediateUploadService } from '../sync/immediate-upload.service';
 import { getDeferredActions, isDeferredAction } from './operation-capture.meta-reducer';
 import { ClientIdService } from '../../core/util/client-id.service';
 import { SuperSyncStatusService } from '../sync/super-sync-status.service';
+import { isLocalDataWipeInProgress } from '../persistence/local-data-wipe-state';
+import { updateGlobalConfigSection } from '../../features/config/store/global-config.actions';
+
+const isWipeSessionConfigAction = (action: PersistentAction): boolean =>
+  action.type === updateGlobalConfigSection.type &&
+  (action as ReturnType<typeof updateGlobalConfigSection>).sectionKey === 'sync';
 
 /**
  * NgRx Effects for persisting application state changes as operations to the
@@ -97,6 +103,15 @@ export class OperationLogEffects {
     action: PersistentAction,
     skipDequeue = false,
   ): Promise<void> {
+    // Wipe window (old account's store still in memory): persist nothing but the
+    // new session's sync config op, so no old data reaches the emptied op log.
+    if (isLocalDataWipeInProgress() && !isWipeSessionConfigAction(action)) {
+      if (!skipDequeue) {
+        this.operationCaptureService.dequeue();
+      }
+      return;
+    }
+
     // Always read from ClientIdService (which has its own in-memory cache).
     // Do NOT cache locally — BackupService.generateNewClientId() updates the
     // service cache, and a local cache here would go stale after backup import.
@@ -265,7 +280,10 @@ export class OperationLogEffects {
           this.inMemoryCompactionCounter = await this.opLogStore.getCompactionCounter();
         }
         this.inMemoryCompactionCounter++;
-        if (this.inMemoryCompactionCounter >= COMPACTION_THRESHOLD) {
+        if (isLocalDataWipeInProgress()) {
+          // compaction would snapshot the old account's in-memory state
+          this.inMemoryCompactionCounter = 0;
+        } else if (this.inMemoryCompactionCounter >= COMPACTION_THRESHOLD) {
           // Trigger compaction asynchronously (don't block write operation)
           // Counter is reset in compaction service on success
           this.triggerCompaction();

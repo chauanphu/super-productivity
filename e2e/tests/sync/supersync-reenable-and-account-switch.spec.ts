@@ -161,8 +161,9 @@ test.describe('@supersync Re-enable and Account Switch', () => {
       // ============ PHASE 3: Verify task is on new account ============
       console.log('[I.6] Phase 3: Verifying task on new account');
 
-      // Task should still be visible on Client A
-      await expectTaskVisible(clientA, taskName);
+      // Switching accounts logs out first, which wipes local data (product behaviour),
+      // so the task does not carry over to the new account.
+      await expect(clientA.page.locator(`task:has-text("${taskName}")`)).toHaveCount(0);
 
       // No error
       const hasError = await clientA.sync.hasSyncError();
@@ -173,8 +174,9 @@ test.describe('@supersync Re-enable and Account Switch', () => {
       await clientB.sync.setupSuperSync(syncConfig2);
       await clientB.sync.syncAndWait();
 
-      await waitForTask(clientB.page, taskName);
-      console.log('[I.6] ✓ Client B on user2 received the task');
+      // Client A was wiped on switch, so user2's account never received the task.
+      await expect(clientB.page.locator(`task:has-text("${taskName}")`)).toHaveCount(0);
+      console.log('[I.6] ✓ Client B on user2 has none of user1 data');
 
       console.log('[I.6] ✓ Account switch completed successfully');
     } finally {

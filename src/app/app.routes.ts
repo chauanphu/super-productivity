@@ -7,6 +7,7 @@ import {
   ValidProjectIdGuard,
   ValidTagIdGuard,
 } from './app.guard';
+import { LoginGuard } from './core/auth/login.guard';
 
 import { TagTaskPageComponent } from './pages/tag-task-page/tag-task-page.component';
 
@@ -16,13 +17,13 @@ export const APP_ROUTES: Routes = [
     path: 'tag/:id/tasks',
     component: TagTaskPageComponent,
     data: { page: 'tag-tasks' },
-    canActivate: [ValidTagIdGuard, FocusOverlayOpenGuard],
+    canActivate: [LoginGuard, ValidTagIdGuard, FocusOverlayOpenGuard],
   },
   // Tag sub-routes (worklog, history, summary, metrics)
   // Must appear after tag/:id/tasks so the more specific path matches first
   {
     path: 'tag/:id',
-    canActivate: [ValidTagIdGuard],
+    canActivate: [LoginGuard, ValidTagIdGuard],
     canActivateChild: [FocusOverlayOpenGuard],
     loadChildren: () => import('./routes/context.routes').then((m) => m.TAG_CHILD_ROUTES),
   },
@@ -30,10 +31,16 @@ export const APP_ROUTES: Routes = [
   // Shares one chunk with tag routes via context.routes.ts
   {
     path: 'project/:id',
-    canActivate: [ValidProjectIdGuard],
+    canActivate: [LoginGuard, ValidProjectIdGuard],
     canActivateChild: [FocusOverlayOpenGuard],
     loadChildren: () =>
       import('./routes/context.routes').then((m) => m.PROJECT_CHILD_ROUTES),
+  },
+  // Only route reachable without a session
+  {
+    path: 'login',
+    loadComponent: () =>
+      import('./pages/login-page/login-page.component').then((m) => m.LoginPageComponent),
   },
   // Standalone pages — all import from same barrel so they share one chunk
   {
@@ -41,89 +48,90 @@ export const APP_ROUTES: Routes = [
     loadComponent: () =>
       import('./routes/pages.routes').then((m) => m.ConfigPageComponent),
     data: { page: 'config' },
-    canActivate: [FocusOverlayOpenGuard],
+    canActivate: [LoginGuard, FocusOverlayOpenGuard],
   },
   {
     path: 'search',
     loadComponent: () =>
       import('./routes/pages.routes').then((m) => m.SearchPageComponent),
     data: { page: 'search' },
-    canActivate: [FocusOverlayOpenGuard],
+    canActivate: [LoginGuard, FocusOverlayOpenGuard],
   },
   {
     path: 'scheduled-list',
     loadComponent: () =>
       import('./routes/pages.routes').then((m) => m.ScheduledListPageComponent),
     data: { page: 'scheduled-list' },
-    canActivate: [FocusOverlayOpenGuard],
+    canActivate: [LoginGuard, FocusOverlayOpenGuard],
   },
   {
     path: 'planner',
     loadComponent: () => import('./routes/pages.routes').then((m) => m.PlannerComponent),
     data: { page: 'planner' },
-    canActivate: [FocusOverlayOpenGuard],
+    canActivate: [LoginGuard, FocusOverlayOpenGuard],
   },
   {
     path: 'schedule',
     loadComponent: () => import('./routes/pages.routes').then((m) => m.ScheduleComponent),
     data: { page: 'schedule' },
-    canActivate: [FocusOverlayOpenGuard],
+    canActivate: [LoginGuard, FocusOverlayOpenGuard],
   },
   {
     path: 'boards',
     loadComponent: () => import('./routes/pages.routes').then((m) => m.BoardsComponent),
     data: { page: 'boards' },
-    canActivate: [FocusOverlayOpenGuard],
+    canActivate: [LoginGuard, FocusOverlayOpenGuard],
   },
   {
     path: 'habits',
     loadComponent: () =>
       import('./routes/pages.routes').then((m) => m.HabitPageComponent),
     data: { page: 'habits' },
-    canActivate: [FocusOverlayOpenGuard],
+    canActivate: [LoginGuard, FocusOverlayOpenGuard],
   },
   {
     path: 'donate',
     loadComponent: () =>
       import('./routes/pages.routes').then((m) => m.DonatePageComponent),
     data: { page: 'donate' },
-    canActivate: [FocusOverlayOpenGuard],
+    canActivate: [LoginGuard, FocusOverlayOpenGuard],
   },
   {
     path: 'contrast-test',
     loadComponent: () =>
       import('./routes/pages.routes').then((m) => m.ContrastTestComponent),
     data: { page: 'contrast-test' },
+    canActivate: [LoginGuard],
   },
   {
     path: 'plugins/:pluginId/index',
     loadComponent: () =>
       import('./routes/pages.routes').then((m) => m.PluginIndexComponent),
     data: { page: 'plugin-index' },
-    canActivate: [FocusOverlayOpenGuard],
+    canActivate: [LoginGuard, FocusOverlayOpenGuard],
   },
   {
     path: 'active/:subPageType',
-    canActivate: [ActiveWorkContextGuard, FocusOverlayOpenGuard],
+    canActivate: [LoginGuard, ActiveWorkContextGuard, FocusOverlayOpenGuard],
     loadComponent: () =>
       import('./routes/pages.routes').then((m) => m.ConfigPageComponent),
   },
   {
     path: 'active/:subPageType/:param',
-    canActivate: [ActiveWorkContextGuard, FocusOverlayOpenGuard],
+    canActivate: [LoginGuard, ActiveWorkContextGuard, FocusOverlayOpenGuard],
     loadComponent: () =>
       import('./routes/pages.routes').then((m) => m.ConfigPageComponent),
   },
   {
     path: 'active',
-    canActivate: [ActiveWorkContextGuard, FocusOverlayOpenGuard],
+    canActivate: [LoginGuard, ActiveWorkContextGuard, FocusOverlayOpenGuard],
     loadComponent: () =>
       import('./routes/pages.routes').then((m) => m.ConfigPageComponent),
   },
   // Wildcard — redirects to default start page
   {
     path: '**',
-    canActivate: [DefaultStartPageGuard],
+    canActivate: [LoginGuard, DefaultStartPageGuard],
     component: TagTaskPageComponent,
   },
 ];

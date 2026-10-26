@@ -1143,6 +1143,13 @@
         "TEXT": "<p>Your file permission for local syncing has been revoked.</p>",
         "TITLE": "Sync: Local file permission denied"
       },
+      "D_PROJECT_MERGE_CONFLICT": {
+        "BTN_CONFIRM": "Apply",
+        "KEEP_LOCAL": "Keep this device's version",
+        "KEEP_REMOTE": "Keep server version",
+        "MSG": "These projects exist on this device and on the server with different content. Choose which version to keep for each project.",
+        "TITLE": "Merge Projects"
+      },
       "D_RESTORE": {
         "BTN_RESTORE": "Restore",
         "CONFIRM_MSG": "Are you absolutely sure you want to restore to <strong>{{timestamp}}</strong>?<br><br>This will <strong>completely replace</strong> all your current data and <strong>cannot be undone</strong>.",
@@ -1338,6 +1345,30 @@
           "S_TEST_SUCCESS": "Connection test successful! Target URL: {{url}}"
         }
       },
+      "ACCOUNT": {
+        "BTN_DELETE": "Delete local data",
+        "BTN_DOWNLOAD_BACKUP": "Download backup",
+        "D_PENDING_MERGE_MSG": "The first-time merge of this device's data into your account has not finished. Continuing deletes all data on this device, including the data that was not merged yet. Download a backup first if you want to keep it.",
+        "D_TITLE": "Delete local data?",
+        "D_UNVERIFIED_MSG": "It could not be confirmed that the data on this device is stored on the server (offline, sync failed or the previous account is unknown). Deleting local data may lose it. Download a backup first if you want to keep it.",
+        "D_UNSYNCED_MSG": "{{count}} change(s) on this device have not been synced and will be lost when the local data is deleted. Download a backup first if you want to keep them.",
+        "LOG_IN": "Log in",
+        "LOG_OUT": "Log out",
+        "S_LOGOUT_FAILED": "Logging out failed. Please try again.",
+        "SIGNED_IN_AS": "Signed in as {{email}}"
+      },
+      "LOGIN": {
+        "ERR_INVALID_CREDENTIALS": "Invalid email or password",
+        "ERR_OFFLINE": "You are offline. Connect to the internet to log in.",
+        "ERR_SERVER": "Server problem or too many attempts. Please try again later.",
+        "ERR_URL_INVALID": "Enter a valid server URL starting with http:// or https://",
+        "ERR_URL_REQUIRED": "Enter your sync server URL",
+        "L_EMAIL": "Email",
+        "L_PASSWORD": "Password",
+        "L_SERVER_URL": "Server URL",
+        "SUBMIT": "Log in",
+        "TITLE": "Log in to Super Productivity"
+      },
       "S": {
         "ALREADY_IN_SYNC": "Already in sync",
         "ARCHIVE_OPERATION_FAILED": "Archive operation failed. Some cleanup may not have completed.",
@@ -1372,6 +1403,7 @@
         "WARN_CLIENT_ID_REGENERATED": "Sync device ID was invalid and has been regenerated. A sync conflict may occur on next sync.",
         "ERROR_UNABLE_TO_READ_REMOTE_DATA": "Error while syncing. Unable to read remote data. Maybe you enabled encryption and your local password does not match the one used to encrypt the remote data?",
         "FINISH_DAY_SYNC_ERROR": "Sync error while finishing day. Please try again.",
+        "FIRST_SYNC_MERGE_E2E_MISMATCH": "Cannot merge this device's data: end-to-end encryption is enabled on only one side (this device or the server). Merging is not supported in this case.",
         "FRESH_CLIENT_SYNC_CANCELLED": "Initial sync cancelled. Remote data was not applied.",
         "HYDRATION_FAILED": "Failed to load data. Please reload the app.",
         "IMPORTING": "Importing data",

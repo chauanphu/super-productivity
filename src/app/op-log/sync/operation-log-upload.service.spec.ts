@@ -277,6 +277,36 @@ describe('OperationLogUploadService', () => {
         expect(mockApiProvider.uploadOps).toHaveBeenCalledTimes(2);
       });
 
+      it('never splits first-sync merge ops across requests (atomic for downloaders)', async () => {
+        const regular = Array.from({ length: 20 }, (_, i) =>
+          createMockEntry(i + 1, `op-${i}`, 'client-1'),
+        );
+        const merge = Array.from({ length: 8 }, (_, i) => {
+          const e = createMockEntry(21 + i, `merge-${i}`, 'client-1');
+          return {
+            ...e,
+            op: { ...e.op, actionType: ActionType.SYNC_APPLY_FIRST_SYNC_MERGE },
+          };
+        });
+        mockOpLogStore.getUnsynced.and.returnValue(
+          Promise.resolve([...regular, ...merge]),
+        );
+        mockApiProvider.uploadOps.and.callFake(async (ops) => ({
+          results: ops.map((op) => ({ opId: op.id, accepted: true })),
+          latestSeq: 28,
+          newOps: [],
+        }));
+
+        await service.uploadPendingOps(mockApiProvider);
+
+        const batches = mockApiProvider.uploadOps.calls
+          .allArgs()
+          .map(([ops]) => ops.map((op) => op.id));
+        expect(batches.length).toBe(2);
+        expect(batches[0].length).toBe(20);
+        expect(batches[1]).toEqual(merge.map((e) => e.op.id));
+      });
+
       describe('piggyback sequence handling', () => {
         it('should handle hasMorePiggyback=true with empty newOps array', async () => {
           mockApiProvider.getLastServerSeq.and.returnValue(Promise.resolve(40));

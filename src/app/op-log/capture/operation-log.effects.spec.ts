@@ -18,6 +18,8 @@ import {
 } from './operation-capture.meta-reducer';
 import { ClientIdService } from '../../core/util/client-id.service';
 import { OperationCaptureService } from './operation-capture.service';
+import { setLocalDataWipeInProgress } from '../persistence/local-data-wipe-state';
+import { updateGlobalConfigSection } from '../../features/config/store/global-config.actions';
 
 describe('OperationLogEffects', () => {
   let effects: OperationLogEffects;
@@ -215,6 +217,51 @@ describe('OperationLogEffects', () => {
       tick(100);
       expect(mockCompactionService.compact).toHaveBeenCalled();
     }));
+
+    describe('while a local data wipe is in progress', () => {
+      beforeEach(() => setLocalDataWipeInProgress(true));
+      afterEach(() => setLocalDataWipeInProgress(false));
+
+      it('drops captured ops (dequeued, not persisted) and never compacts', fakeAsync(() => {
+        mockOpLogStore.getCompactionCounter.and.returnValue(
+          Promise.resolve(COMPACTION_THRESHOLD - 1),
+        );
+        actions$ = of(createPersistentAction(ActionType.TASK_SHARED_UPDATE));
+        effects.persistOperation$.subscribe();
+        tick(100);
+        expect(mockOperationCaptureService.dequeue).toHaveBeenCalledTimes(1);
+        expect(mockOpLogStore.appendWithVectorClockUpdate).not.toHaveBeenCalled();
+        expect(mockCompactionService.compact).not.toHaveBeenCalled();
+      }));
+
+      it('persists the sync config op of the new session without compacting', fakeAsync(() => {
+        mockOpLogStore.getCompactionCounter.and.returnValue(
+          Promise.resolve(COMPACTION_THRESHOLD - 1),
+        );
+        actions$ = of(
+          updateGlobalConfigSection({
+            sectionKey: 'sync',
+            sectionCfg: { isEnabled: true },
+          }) as unknown as PersistentAction,
+        );
+        effects.persistOperation$.subscribe();
+        tick(100);
+        expect(mockOpLogStore.appendWithVectorClockUpdate).toHaveBeenCalledTimes(1);
+        expect(mockCompactionService.compact).not.toHaveBeenCalled();
+      }));
+
+      it('drops config ops of other sections', fakeAsync(() => {
+        actions$ = of(
+          updateGlobalConfigSection({
+            sectionKey: 'misc',
+            sectionCfg: {},
+          }) as unknown as PersistentAction,
+        );
+        effects.persistOperation$.subscribe();
+        tick(100);
+        expect(mockOpLogStore.appendWithVectorClockUpdate).not.toHaveBeenCalled();
+      }));
+    });
 
     it('should not trigger compaction when below threshold', (done) => {
       // Counter starts at threshold - 2, after increment it's still below threshold

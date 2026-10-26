@@ -35,6 +35,9 @@ export const STORE_NAMES = {
 /** Common key used for singleton entries */
 export const SINGLETON_KEY = 'current' as const;
 
+/** import_backup entry holding the pending first-sync merge (local snapshot + phase) */
+export const FIRST_SYNC_MERGE_PENDING_KEY = 'first_sync_merge_pending' as const;
+
 /** Backup key for state cache backup */
 export const BACKUP_KEY = 'backup' as const;
 

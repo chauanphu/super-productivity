@@ -7,7 +7,9 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { Router } from '@angular/router';
+import { from } from 'rxjs';
 import {
   MatDialog,
   MatDialogActions,
@@ -45,6 +47,8 @@ import { WebdavApi } from '../../../op-log/sync-providers/file-based/webdav/webd
 import { WebdavPrivateCfg } from '../../../op-log/sync-providers/file-based/webdav/webdav.model';
 import { NextcloudPrivateCfg } from '../../../op-log/sync-providers/file-based/webdav/nextcloud.model';
 import { NextcloudProvider } from '../../../op-log/sync-providers/file-based/webdav/nextcloud';
+import { SuperSyncAuthService } from '../../../op-log/sync-providers/super-sync/super-sync-auth.service';
+import { AccountSessionService } from '../../../core/auth/account-session.service';
 
 @Component({
   selector: 'dialog-sync-cfg',
@@ -71,6 +75,13 @@ export class DialogSyncCfgComponent implements AfterViewInit {
   private _snackService = inject(SnackService);
 
   private _destroyRef = inject(DestroyRef);
+  private _accountSession = inject(AccountSessionService);
+  private _router = inject(Router);
+
+  readonly session = toSignal(from(inject(SuperSyncAuthService).getSession()), {
+    initialValue: null,
+  });
+  readonly SUPER_SYNC = SyncProviderId.SuperSync;
 
   T = T;
   isWasEnabled = signal(false);
@@ -399,6 +410,21 @@ export class DialogSyncCfgComponent implements AfterViewInit {
           }
         });
     }, 0);
+  }
+
+  async logout(): Promise<void> {
+    // 'DONE' reloads the app; 'CANCELLED' keeps everything as it is.
+    try {
+      await this._accountSession.logout();
+    } catch (e) {
+      SyncLog.err('Logout failed', e);
+      this._snackService.open({ type: 'ERROR', msg: T.F.SYNC.ACCOUNT.S_LOGOUT_FAILED });
+    }
+  }
+
+  goToLogin(): void {
+    this.close();
+    this._router.navigateByUrl('/login');
   }
 
   close(): void {

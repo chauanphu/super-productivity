@@ -22,6 +22,8 @@ import {
   IDB_OPEN_RETRY_BASE_DELAY_MS,
 } from '../core/operation-log.const';
 import { IndexedDBOpenError } from '../core/errors/indexed-db-open.error';
+import { ArchiveStoreService } from './archive-store.service';
+import { ArchiveModel } from '../../features/time-tracking/time-tracking.model';
 
 describe('OperationLogStoreService', () => {
   let service: OperationLogStoreService;
@@ -329,6 +331,26 @@ describe('OperationLogStoreService', () => {
     });
   });
 
+  describe('hasRejectedOpOfType', () => {
+    it('is true only for a rejected op of the given action type', async () => {
+      const merge = createTestOperation({
+        actionType: ActionType.SYNC_APPLY_FIRST_SYNC_MERGE,
+      });
+      const other = createTestOperation();
+      await service.append(merge);
+      await service.append(other);
+      await service.markRejected([other.id]);
+      expect(
+        await service.hasRejectedOpOfType(ActionType.SYNC_APPLY_FIRST_SYNC_MERGE),
+      ).toBe(false);
+
+      await service.markRejected([merge.id]);
+      expect(
+        await service.hasRejectedOpOfType(ActionType.SYNC_APPLY_FIRST_SYNC_MERGE),
+      ).toBe(true);
+    });
+  });
+
   describe('deleteOpsWhere', () => {
     it('should delete operations matching predicate', async () => {
       const op1 = createTestOperation({ actionType: '[Task] Create' as ActionType });
@@ -391,6 +413,42 @@ describe('OperationLogStoreService', () => {
     it('should return null when no state cache exists', async () => {
       const loaded = await service.loadStateCache();
       expect(loaded).toBeNull();
+    });
+  });
+
+  describe('clearAllUserData', () => {
+    it('clears ops, state cache, vector clock, import backups, archives and profiles', async () => {
+      const archives = TestBed.inject(ArchiveStoreService);
+      const archive = {
+        task: { ids: ['a'], entities: {} },
+        timeTracking: { project: {}, tag: {} },
+        lastTimeTrackingFlush: 1,
+      } as unknown as ArchiveModel;
+      await service.append(createTestOperation());
+      await service.saveStateCache({
+        state: { x: 1 },
+        lastAppliedOpSeq: 1,
+        vectorClock: { c: 1 },
+        compactedAt: 1,
+        schemaVersion: 1,
+      });
+      await service.setVectorClock({ c: 3 });
+      await service.saveImportBackup({ x: 1 });
+      await service.saveFirstSyncMergePending({ x: 1 });
+      await service.saveProfileData('p1', { x: 1 } as never);
+      await archives.saveArchivesAtomic(archive, archive);
+
+      await service.clearAllUserData();
+
+      expect(await service.getOpsAfterSeq(0)).toEqual([]);
+      expect(await service.getUnsynced()).toEqual([]);
+      expect(await service.loadStateCache()).toBeNull();
+      expect(await service.getVectorClock()).toBeNull();
+      expect(await service.loadImportBackup()).toBeNull();
+      expect(await service.loadFirstSyncMergePending()).toBeNull();
+      expect(await service.loadProfileData('p1')).toBeNull();
+      expect(await archives.hasArchiveYoung()).toBe(false);
+      expect(await archives.hasArchiveOld()).toBe(false);
     });
   });
 
@@ -1432,6 +1490,20 @@ describe('OperationLogStoreService', () => {
 
       const backup = await service.loadImportBackup();
       expect(backup).toBeNull();
+    });
+
+    it('should keep the first-sync merge pending record separate from the import backup', async () => {
+      const pending = { userId: 1, downloaded: false };
+      await service.saveFirstSyncMergePending(pending);
+      expect(await service.hasImportBackup()).toBe(false);
+      expect(await service.loadFirstSyncMergePending()).toEqual(pending);
+
+      await service.saveImportBackup({ other: true });
+      await service.clearImportBackup();
+      expect(await service.loadFirstSyncMergePending()).toEqual(pending);
+
+      await service.clearFirstSyncMergePending();
+      expect(await service.loadFirstSyncMergePending()).toBeNull();
     });
 
     it('should check if backup exists with hasImportBackup', async () => {

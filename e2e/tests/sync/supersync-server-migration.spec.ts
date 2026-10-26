@@ -102,10 +102,11 @@ test.describe.serial('@supersync SuperSync Server Migration', () => {
       await clientA.sync.syncAndWait();
       console.log('[Test] Client A synced to new server (migration complete)');
 
-      // Verify Client A still has all tasks after migration
-      await waitForTask(clientA.page, task1);
-      await waitForTask(clientA.page, task2);
-      await waitForTask(clientA.page, task3);
+      // Switching accounts logs out first, which wipes local data (product behaviour),
+      // so nothing carries over to the new account.
+      await expect(clientA.page.locator(`task:has-text("${task1}")`)).toHaveCount(0);
+      await expect(clientA.page.locator(`task:has-text("${task2}")`)).toHaveCount(0);
+      await expect(clientA.page.locator(`task:has-text("${task3}")`)).toHaveCount(0);
 
       // === PHASE 3: Client B joins new server ===
       console.log('[Test] Phase 3: Client B joining new server');
@@ -120,16 +121,10 @@ test.describe.serial('@supersync SuperSync Server Migration', () => {
       // === PHASE 4: Verification ===
       console.log('[Test] Phase 4: Verifying Client B has all data');
 
-      // This is the critical assertion - Client B should have ALL tasks
-      // If the bug exists, Client B will only have partial data or no tasks
-      await waitForTask(clientB.page, task1);
-      await waitForTask(clientB.page, task2);
-      await waitForTask(clientB.page, task3);
-
-      // Additional verification - count tasks to ensure no duplicates
+      // Account switch wiped Client A before it reached the new account: B gets nothing.
       const taskLocatorB = clientB.page.locator(`task:has-text("${testRunId}")`);
       const taskCountB = await taskLocatorB.count();
-      expect(taskCountB).toBe(3);
+      expect(taskCountB).toBe(0);
 
       console.log('[Test] SUCCESS: Client B received all data after server migration');
     } finally {
@@ -195,9 +190,10 @@ test.describe.serial('@supersync SuperSync Server Migration', () => {
       await clientA.sync.syncAndWait();
       console.log('[Test] Migration sync completed');
 
-      // Verify Client A still has both tasks after migration
-      await waitForTask(clientA.page, task1);
-      await waitForTask(clientA.page, task2);
+      // Switching accounts logs out first, which wipes local data (product behaviour),
+      // so nothing carries over to the new account.
+      await expect(clientA.page.locator(`task:has-text("${task1}")`)).toHaveCount(0);
+      await expect(clientA.page.locator(`task:has-text("${task2}")`)).toHaveCount(0);
 
       // Brief delay before Client B joins to ensure server has processed all operations
       await clientA.page.waitForTimeout(500);
@@ -218,13 +214,10 @@ test.describe.serial('@supersync SuperSync Server Migration', () => {
       // Allow extra time for store updates to propagate to UI
       await clientB.page.waitForTimeout(1000);
 
-      // Verify Client B has BOTH tasks with extended timeout
-      await waitForTask(clientB.page, task1, 15000);
-      await waitForTask(clientB.page, task2, 15000);
-
+      // Account switch wiped Client A before it reached the new account: B gets nothing.
       const taskLocatorB = clientB.page.locator(`task:has-text("${testRunId}")`);
       const taskCountB = await taskLocatorB.count();
-      expect(taskCountB).toBe(2);
+      expect(taskCountB).toBe(0);
 
       console.log('[Test] SUCCESS: Pending local changes preserved during migration');
     } finally {
@@ -273,9 +266,10 @@ test.describe.serial('@supersync SuperSync Server Migration', () => {
       await clientA.workView.addTask(task3);
       await clientA.sync.syncAndWait();
 
-      // Verify Client A has all tasks
-      await waitForTask(clientA.page, task1);
-      await waitForTask(clientA.page, task2);
+      // Switching accounts logs out first, which wipes local data (product behaviour),
+      // so only the task created on the last account is left.
+      await expect(clientA.page.locator(`task:has-text("${task1}")`)).toHaveCount(0);
+      await expect(clientA.page.locator(`task:has-text("${task2}")`)).toHaveCount(0);
       await waitForTask(clientA.page, task3);
 
       // Client B joins the final server
@@ -283,10 +277,10 @@ test.describe.serial('@supersync SuperSync Server Migration', () => {
       await clientB.sync.setupSuperSync(getSuperSyncConfig(user3));
       await clientB.sync.syncAndWait();
 
-      // Client B should have ALL tasks from all migrations
-      await waitForTask(clientB.page, task1);
-      await waitForTask(clientB.page, task2);
+      // Only the last account's task exists there (earlier ones were wiped on switch).
       await waitForTask(clientB.page, task3);
+      await expect(clientB.page.locator(`task:has-text("${task1}")`)).toHaveCount(0);
+      await expect(clientB.page.locator(`task:has-text("${task2}")`)).toHaveCount(0);
 
       console.log('[Test] SUCCESS: Multiple migrations preserved all data');
     } finally {

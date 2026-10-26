@@ -19,7 +19,6 @@ export interface SyncCollapsibleProps extends FormlyFieldProps {
   syncRole?: 'advanced';
 }
 import { IS_NATIVE_PLATFORM } from '../../../util/is-native-platform';
-import { SUPER_SYNC_DEFAULT_BASE_URL } from '../../../op-log/sync-providers/super-sync/super-sync.model';
 import {
   closeAllDialogs,
   openDisableEncryptionDialogForFileBased,
@@ -462,38 +461,8 @@ export const SYNC_FORM: ConfigFormSection<SyncConfig> = {
     {
       key: 'superSync',
       fieldGroup: [
-        {
-          hideExpression: (m, v, field) =>
-            field?.parent?.parent?.model.syncProvider !== SyncProviderId.SuperSync,
-          type: 'btn',
-          templateOptions: {
-            text: T.F.SYNC.FORM.SUPER_SYNC.BTN_GET_TOKEN,
-            tooltip: T.F.SYNC.FORM.SUPER_SYNC.LOGIN_INSTRUCTIONS,
-            btnType: 'primary',
-            btnStyle: 'stroked',
-            centerBtn: true,
-            onClick: (field: any) => {
-              const baseUrl = field.model.baseUrl || SUPER_SYNC_DEFAULT_BASE_URL;
-              window.open(baseUrl, '_blank');
-            },
-          },
-        },
-        {
-          hideExpression: (m, v, field) =>
-            field?.parent?.parent?.model.syncProvider !== SyncProviderId.SuperSync,
-          key: 'accessToken',
-          type: 'textarea',
-          className: 'e2e-accessToken',
-          templateOptions: {
-            label: T.F.SYNC.FORM.SUPER_SYNC.L_ACCESS_TOKEN,
-            description: T.F.SYNC.FORM.SUPER_SYNC.ACCESS_TOKEN_DESCRIPTION,
-            rows: 3,
-          },
-          expressions: {
-            'props.required': (field: FormlyFieldConfig) =>
-              field?.parent?.parent?.model?.syncProvider === SyncProviderId.SuperSync,
-          },
-        },
+        // Log in / Log out lives in DialogSyncCfgComponent (needs DI). No raw token
+        // field: accounts only change via login (AccountSessionService.completeLogin).
         // Encryption encouragement warning (shown when encryption is NOT enabled)
         // Hidden during initial setup (encryption dialog opens automatically after save)
         {
@@ -548,7 +517,12 @@ export const SYNC_FORM: ConfigFormSection<SyncConfig> = {
               templateOptions: {
                 label: T.F.SYNC.FORM.SUPER_SYNC.L_SERVER_URL,
                 description: T.F.SYNC.FORM.SUPER_SYNC.SERVER_URL_DESCRIPTION,
-                placeholder: SUPER_SYNC_DEFAULT_BASE_URL,
+                placeholder: 'https://sync.example.com',
+              },
+              expressions: {
+                // The server belongs to the signed-in account; change it by logging in.
+                'props.disabled': (field: FormlyFieldConfig) =>
+                  !!field?.model?.accessToken,
               },
             },
           ],

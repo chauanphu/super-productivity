@@ -148,6 +148,11 @@ export class OperationLogSyncService {
     return !snapshot && lastSeq === 0;
   }
 
+  /** Public entry for the SuperSync first-sync merge trigger. */
+  hasMeaningfulLocalData(): boolean {
+    return this._hasMeaningfulLocalData();
+  }
+
   /**
    * Checks if the NgRx store has meaningful user data (tasks, projects, tags, notes).
    * This detects data that existed before the operation-log feature was added.

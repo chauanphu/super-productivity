@@ -1,6 +1,7 @@
 import { inject, Injectable } from '@angular/core';
 import { DBSchema, IDBPDatabase, openDB } from 'idb';
 import {
+  ActionType,
   Operation,
   OperationLogEntry,
   VectorClock,
@@ -21,6 +22,7 @@ import {
   STORE_NAMES,
   SINGLETON_KEY,
   BACKUP_KEY,
+  FIRST_SYNC_MERGE_PENDING_KEY,
   OPS_INDEXES,
   ArchiveStoreEntry,
   ProfileDataStoreEntry,
@@ -761,6 +763,15 @@ export class OperationLogStoreService {
     return [...this._unsyncedCache];
   }
 
+  /** True if any op of this action type was permanently rejected (getUnsynced() skips those). */
+  async hasRejectedOpOfType(actionType: ActionType): Promise<boolean> {
+    await this._ensureInit();
+    const all = await this.db.getAll(STORE_NAMES.OPS);
+    return all.some(
+      (e) => !!e.rejectedAt && decodeStoredEntry(e).op.actionType === actionType,
+    );
+  }
+
   /**
    * Invalidates the unsynced cache. Called when operations are marked synced/rejected.
    */
@@ -1215,6 +1226,30 @@ export class OperationLogStoreService {
     this._vectorClockCache = null;
   }
 
+  /**
+   * Deletes all user data in SUP_OPS (logout / account switch, LocalDataWipeService):
+   * ops (synced + unsynced), state cache, import backups incl. the pending first-sync
+   * merge marker, vector clock, archives and stored profiles.
+   */
+  async clearAllUserData(): Promise<void> {
+    await this._ensureInit();
+    const stores = [
+      STORE_NAMES.OPS,
+      STORE_NAMES.STATE_CACHE,
+      STORE_NAMES.IMPORT_BACKUP,
+      STORE_NAMES.VECTOR_CLOCK,
+      STORE_NAMES.ARCHIVE_YOUNG,
+      STORE_NAMES.ARCHIVE_OLD,
+      STORE_NAMES.PROFILE_DATA,
+    ] as const;
+    const tx = this.db.transaction(stores, 'readwrite');
+    await Promise.all([...stores.map((s) => tx.objectStore(s).clear()), tx.done]);
+    this._appliedOpIdsCache = null;
+    this._cacheLastSeq = 0;
+    this._invalidateUnsyncedCache();
+    this._vectorClockCache = null;
+  }
+
   // ============================================================
   // Import Backup (pre-import state preservation)
   // ============================================================
@@ -1247,6 +1282,33 @@ export class OperationLogStoreService {
   async clearImportBackup(): Promise<void> {
     await this._ensureInit();
     await this.db.delete(STORE_NAMES.IMPORT_BACKUP, SINGLETON_KEY);
+  }
+
+  /**
+   * Pending first-sync merge record (FirstSyncMergeService). Lives in import_backup under
+   * its own id so it can hold a multi-MB local snapshot and survives restarts.
+   */
+  async saveFirstSyncMergePending(state: unknown): Promise<void> {
+    await this._ensureInit();
+    await this.db.put(STORE_NAMES.IMPORT_BACKUP, {
+      id: FIRST_SYNC_MERGE_PENDING_KEY,
+      state,
+      savedAt: Date.now(),
+    });
+  }
+
+  async loadFirstSyncMergePending(): Promise<unknown | null> {
+    await this._ensureInit();
+    const entry = await this.db.get(
+      STORE_NAMES.IMPORT_BACKUP,
+      FIRST_SYNC_MERGE_PENDING_KEY,
+    );
+    return entry ? entry.state : null;
+  }
+
+  async clearFirstSyncMergePending(): Promise<void> {
+    await this._ensureInit();
+    await this.db.delete(STORE_NAMES.IMPORT_BACKUP, FIRST_SYNC_MERGE_PENDING_KEY);
   }
 
   /**

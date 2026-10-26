@@ -37,6 +37,10 @@ import { alertDialog } from '../../util/native-dialogs';
 import { DataInitStateService } from '../data-init/data-init-state.service';
 import { OnboardingHintService } from '../../features/onboarding/onboarding-hint.service';
 import { LocalRestApiHandlerService } from '../electron/local-rest-api-handler.service';
+import {
+  consumeSkipBackupPromptOnce,
+  isLocalDataWipeReloading,
+} from '../../op-log/persistence/local-data-wipe-state';
 
 const w = window as Window & { productivityTips?: string[][]; randomIndex?: number };
 
@@ -144,6 +148,9 @@ export class StartupService {
     } else {
       // WEB VERSION
       window.addEventListener('beforeunload', (e) => {
+        if (isLocalDataWipeReloading()) {
+          return;
+        }
         const gCfg = this._globalConfigService.cfg();
         if (!gCfg) {
           throw new Error();
@@ -165,6 +172,8 @@ export class StartupService {
   }
 
   private async _initBackups(): Promise<void> {
+    // one-shot, consumed on every startup: set by a logout/account-switch wipe
+    const isSkipBackupPrompt = consumeSkipBackupPromptOnce();
     // if completely fresh instance check for local backups
     // Local backups are available on Electron and native mobile (iOS/Android)
     if (IS_ELECTRON || this._platformService.isNative) {
@@ -186,7 +195,7 @@ export class StartupService {
 
         // Only offer to restore from backup if this is truly a fresh install
         // (no state cache AND no legacy data)
-        if (!hasLegacyData) {
+        if (!hasLegacyData && !isSkipBackupPrompt) {
           await this._localBackupService.askForFileStoreBackupIfAvailable();
         }
       }
