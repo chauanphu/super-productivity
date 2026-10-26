@@ -9,6 +9,7 @@ import { OpLog } from '../../core/log';
 import { DataInitStateService } from '../../core/data-init/data-init-state.service';
 import { handleStorageQuotaError } from './sync-error-utils';
 import { SyncWrapperService } from '../../imex/sync/sync-wrapper.service';
+import { FirstSyncMergeService } from './first-sync-merge/first-sync-merge.service';
 
 const IMMEDIATE_UPLOAD_DEBOUNCE_MS = 2000;
 
@@ -51,6 +52,7 @@ export class ImmediateUploadService implements OnDestroy {
   private _syncService = inject(OperationLogSyncService);
   private _dataInitStateService = inject(DataInitStateService);
   private _syncWrapper = inject(SyncWrapperService);
+  private _firstSyncMerge = inject(FirstSyncMergeService);
 
   private _uploadTrigger$ = new Subject<void>();
   private _subscription: Subscription | null = null;
@@ -151,6 +153,11 @@ export class ImmediateUploadService implements OnDestroy {
 
     // Must support operation sync (SuperSync implements this directly)
     if (!isOperationSyncCapable(provider)) {
+      return false;
+    }
+
+    // Local data must not reach a SuperSync account before the first-sync merge
+    if (this._firstSyncMerge.isFirstSyncMergePendingOrRequired()) {
       return false;
     }
 

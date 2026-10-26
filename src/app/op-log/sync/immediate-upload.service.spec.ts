@@ -8,7 +8,10 @@ import { SyncWrapperService } from '../../imex/sync/sync-wrapper.service';
 import { BehaviorSubject } from 'rxjs';
 import { RejectedOpInfo } from '../core/types/sync-results.types';
 
+import { FirstSyncMergeService } from './first-sync-merge/first-sync-merge.service';
+
 describe('ImmediateUploadService', () => {
+  let isMergePending: boolean;
   let service: ImmediateUploadService;
   let mockProviderManager: jasmine.SpyObj<SyncProviderManager>;
   let mockSyncService: jasmine.SpyObj<OperationLogSyncService>;
@@ -81,9 +84,14 @@ describe('ImmediateUploadService', () => {
       isEncryptionOperationInProgress: false,
     };
 
+    isMergePending = false;
     TestBed.configureTestingModule({
       providers: [
         ImmediateUploadService,
+        {
+          provide: FirstSyncMergeService,
+          useValue: { isFirstSyncMergePendingOrRequired: () => isMergePending },
+        },
         { provide: SyncProviderManager, useValue: mockProviderManager },
         { provide: OperationLogSyncService, useValue: mockSyncService },
         { provide: DataInitStateService, useValue: mockDataInitStateService },
@@ -167,6 +175,19 @@ describe('ImmediateUploadService', () => {
   });
 
   describe('guards', () => {
+    it('should skip upload while the first-sync merge is pending or required', fakeAsync(() => {
+      isMergePending = true;
+      mockSyncService.uploadPendingOps.and.returnValue(
+        Promise.resolve(completedResult({ uploadedCount: 1 })),
+      );
+
+      service.initialize();
+      service.trigger();
+      tick(2100);
+
+      expect(mockSyncService.uploadPendingOps).not.toHaveBeenCalled();
+    }));
+
     it('should skip upload when sync is in progress', fakeAsync(() => {
       // Need to re-create the mock with isSyncInProgress = true
       Object.defineProperty(mockProviderManager, 'isSyncInProgress', { value: true });

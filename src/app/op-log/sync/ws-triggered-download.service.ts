@@ -7,6 +7,7 @@ import { SyncProviderManager } from '../sync-providers/provider-manager.service'
 import { WrappedProviderService } from '../sync-providers/wrapped-provider.service';
 import { SyncLog } from '../../core/log';
 import { AuthFailSPError, MissingCredentialsSPError } from '../sync-exports';
+import { FirstSyncMergeService } from './first-sync-merge/first-sync-merge.service';
 
 const WS_DOWNLOAD_DEBOUNCE_MS = 500;
 
@@ -26,6 +27,7 @@ export class WsTriggeredDownloadService implements OnDestroy {
   private _syncService = inject(OperationLogSyncService);
   private _providerManager = inject(SyncProviderManager);
   private _wrappedProvider = inject(WrappedProviderService);
+  private _firstSyncMerge = inject(FirstSyncMergeService);
 
   private _subscription: Subscription | null = null;
 
@@ -59,6 +61,11 @@ export class WsTriggeredDownloadService implements OnDestroy {
   private async _downloadOps(latestSeq: number): Promise<void> {
     if (this._providerManager.isSyncInProgress) {
       SyncLog.log('WsTriggeredDownloadService: Sync in progress, skipping WS download');
+      return;
+    }
+    // a remote download would replace local data the first-sync merge still needs
+    if (this._firstSyncMerge.isFirstSyncMergePendingOrRequired()) {
+      SyncLog.log('WsTriggeredDownloadService: First-sync merge pending, skipping');
       return;
     }
 

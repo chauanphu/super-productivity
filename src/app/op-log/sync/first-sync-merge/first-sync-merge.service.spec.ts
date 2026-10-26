@@ -27,6 +27,11 @@ import { applyFirstSyncMerge } from '../../../root-store/meta/first-sync-merge.a
 import { ActionType } from '../../core/action-types.enum';
 import { T } from '../../../t.const';
 import { FirstSyncMergePayload } from './first-sync-merge';
+import { SyncProviderManager } from '../../sync-providers/provider-manager.service';
+import { SyncProviderId } from '../../sync-providers/provider.const';
+import { OperationEncryptionService } from '../operation-encryption.service';
+import { loadAllData } from '../../../root-store/meta/load-all-data.action';
+import { OperationLogEntry } from '../../core/operation.types';
 
 const USER_ID = 42;
 
@@ -83,6 +88,9 @@ describe('FirstSyncMergeService', () => {
   let provider: jasmine.SpyObj<OperationSyncCapable>;
   let encryptKey: string | undefined;
   let remoteOps: { op: { isPayloadEncrypted?: boolean } }[];
+  let lastSyncedProvider: SyncProviderId | null;
+  let encryption: jasmine.SpyObj<OperationEncryptionService>;
+  let deletePredicate: ((e: OperationLogEntry) => boolean) | undefined;
 
   beforeEach(() => {
     calls = [];
@@ -92,6 +100,8 @@ describe('FirstSyncMergeService', () => {
     lastServerSeq = 0;
     encryptKey = undefined;
     remoteOps = [{ op: {} }];
+    lastSyncedProvider = null;
+    deletePredicate = undefined;
     storeState = data([project('pLocal')], [task('t1', { projectId: 'pLocal' })]);
     remoteState = data([project('pRemote')]);
 
@@ -104,7 +114,14 @@ describe('FirstSyncMergeService', () => {
       'clearFirstSyncMergePending',
       'hasSyncedOps',
       'getUnsynced',
+      'getLastSeq',
+      'deleteOpsWhere',
     ]);
+    opLogStore.getLastSeq.and.resolveTo(100);
+    opLogStore.deleteOpsWhere.and.callFake(async (pred) => {
+      calls.push('deleteRemoteOps');
+      deletePredicate = pred;
+    });
     opLogStore.loadFirstSyncMergePending.and.callFake(async () => pendingInDb);
     opLogStore.saveFirstSyncMergePending.and.callFake(async (p) => {
       calls.push(`savePending:${(p as FirstSyncMergePending).downloaded}`);
@@ -162,11 +179,23 @@ describe('FirstSyncMergeService', () => {
     snack = jasmine.createSpyObj('SnackService', ['open']);
     const store = jasmine.createSpyObj('Store', ['dispatch']);
     store.dispatch.and.callFake((a: ReturnType<typeof applyFirstSyncMerge>) => {
+      if ((a as { type: string }).type === loadAllData.type) {
+        calls.push('resetStore');
+        return;
+      }
       calls.push('dispatch');
       if (persistOps) {
         dispatched.push(a.payload);
       }
     });
+    encryption = jasmine.createSpyObj('OperationEncryptionService', [
+      'decryptOperations',
+    ]);
+    encryption.decryptOperations.and.resolveTo([]);
+    const providerManager = jasmine.createSpyObj('SyncProviderManager', [
+      'getLastSyncedProviderId',
+    ]);
+    providerManager.getLastSyncedProviderId.and.callFake(() => lastSyncedProvider);
 
     provider = jasmine.createSpyObj('OperationSyncCapable', [
       'getLastServerSeq',
@@ -192,6 +221,8 @@ describe('FirstSyncMergeService', () => {
         { provide: UserInputWaitStateService, useValue: waitState },
         { provide: SnackService, useValue: snack },
         { provide: Store, useValue: store },
+        { provide: OperationEncryptionService, useValue: encryption },
+        { provide: SyncProviderManager, useValue: providerManager },
       ],
     });
     service = TestBed.inject(FirstSyncMergeService);
@@ -207,6 +238,16 @@ describe('FirstSyncMergeService', () => {
       projects: dispatched.flatMap((p) => p.projects),
       tasks: dispatched.flatMap((p) => p.tasks),
     }) as FirstSyncMergePayload;
+
+  const pendingRecord = (
+    p: Partial<FirstSyncMergePending> = {},
+  ): FirstSyncMergePending => ({
+    userId: USER_ID,
+    local: data([project('pLocal')], [task('t1', { projectId: 'pLocal' })]),
+    downloaded: true,
+    opLogSeqAtStart: 50,
+    ...p,
+  });
 
   describe('runIfNeeded (trigger)', () => {
     it('merges when SuperSync device has data and never synced with this account', async () => {
@@ -228,10 +269,18 @@ describe('FirstSyncMergeService', () => {
       expect(opLogSync.forceDownloadRemoteState).not.toHaveBeenCalled();
     });
 
-    it('skips and sets the done marker when the device already has synced ops', async () => {
+    it('skips and sets the done marker when the device synced ops with SuperSync', async () => {
       opLogStore.hasSyncedOps.and.resolveTo(true);
+      lastSyncedProvider = SyncProviderId.SuperSync;
       expect(await service.runIfNeeded(provider)).toBe('SKIPPED');
       expect(isDone()).toBeTrue();
+    });
+
+    it('still merges when the synced ops came from another provider', async () => {
+      opLogStore.hasSyncedOps.and.resolveTo(true);
+      lastSyncedProvider = SyncProviderId.Dropbox;
+      expect(await service.runIfNeeded(provider)).toBe('MERGED');
+      expect(opLogSync.forceDownloadRemoteState).toHaveBeenCalled();
     });
 
     it('skips without marking done when there is no meaningful local data', async () => {
@@ -246,6 +295,44 @@ describe('FirstSyncMergeService', () => {
       expect(await service.runIfNeeded(provider)).toBe('SKIPPED');
       expect(opLogSync.forceDownloadRemoteState).not.toHaveBeenCalled();
     });
+
+    it('empty remote account: no merge, done marker set, SKIPPED', async () => {
+      remoteOps = [];
+      expect(await service.runIfNeeded(provider)).toBe('SKIPPED');
+      expect(isDone()).toBeTrue();
+      expect(calls).toEqual([]);
+      expect(pendingInDb).toBeNull();
+    });
+  });
+
+  describe('background gate (isFirstSyncMergePendingOrRequired)', () => {
+    it('is closed before the first check of this app session', () => {
+      expect(service.isFirstSyncMergePendingOrRequired()).toBeTrue();
+    });
+
+    it('opens when nothing is needed', async () => {
+      localStorage.setItem(FIRST_SYNC_MERGE_DONE_KEY_PREFIX + USER_ID, '1');
+      await service.runIfNeeded(provider);
+      expect(service.isFirstSyncMergePendingOrRequired()).toBeFalse();
+    });
+
+    it('opens after a successful merge', async () => {
+      await service.runIfNeeded(provider);
+      expect(service.isFirstSyncMergePendingOrRequired()).toBeFalse();
+    });
+
+    it('stays closed when the merge is cancelled', async () => {
+      remoteOps = [{ op: { isPayloadEncrypted: true } }];
+      matDialog.open.and.returnValue({ afterClosed: () => of({}) } as never);
+      expect(await service.runIfNeeded(provider)).toBe('CANCELLED');
+      expect(service.isFirstSyncMergePendingOrRequired()).toBeTrue();
+    });
+
+    it('stays closed when the merge fails (pending marker kept)', async () => {
+      archiveHandler.writeFirstSyncMergeArchive.and.rejectWith(new Error('idb'));
+      await expectAsync(service.runIfNeeded(provider)).toBeRejected();
+      expect(service.isFirstSyncMergePendingOrRequired()).toBeTrue();
+    });
   });
 
   describe('run', () => {
@@ -254,7 +341,9 @@ describe('FirstSyncMergeService', () => {
       expect(conflictDialog.open).not.toHaveBeenCalled();
       expect(calls).toEqual([
         'savePending:false',
+        'deleteRemoteOps',
         'archiveReset',
+        'resetStore',
         'forceDownload',
         'savePending:true',
         'archiveWrite',
@@ -265,6 +354,7 @@ describe('FirstSyncMergeService', () => {
       // local snapshot (taken before download) was merged onto remote
       expect(allDispatched().projects.map((p) => p.id)).toEqual(['pLocal']);
       expect(allDispatched().tasks.map((t) => t.id)).toEqual(['t1']);
+      expect((pendingInDb as FirstSyncMergePending | null) ?? null).toBeNull();
       expect(isDone()).toBeTrue();
     });
 
@@ -300,16 +390,6 @@ describe('FirstSyncMergeService', () => {
       expect(allDispatched().projects.map((p) => p.id)).not.toContain('p1');
     });
 
-    it('empty remote (new account): pushes all local projects', async () => {
-      remoteOps = [];
-      opLogSync.forceDownloadRemoteState.and.callFake(async () => {
-        calls.push('forceDownload'); // empty server: store keeps local data
-      });
-      await service.run(provider, USER_ID);
-      expect(allDispatched().projects.map((p) => p.id)).toEqual(['pLocal']);
-      expect((pendingInDb as FirstSyncMergePending | null) ?? null).toBeNull();
-    });
-
     it('E2E on device only: snackbar, E2E_MISMATCH, nothing touched', async () => {
       encryptKey = 'k';
       expect(await service.run(provider, USER_ID)).toBe('E2E_MISMATCH');
@@ -328,11 +408,21 @@ describe('FirstSyncMergeService', () => {
 
     it('remote encrypted, user enters the key: merge proceeds', async () => {
       remoteOps = [{ op: { isPayloadEncrypted: true } }];
-      matDialog.open.and.returnValue({
-        afterClosed: () => of({ password: 'pw' }),
-      } as never);
+      matDialog.open.and.callFake((() => {
+        encryptKey = 'pw'; // the dialog saves the key in the provider config
+        return { afterClosed: () => of({ password: 'pw' }) };
+      }) as never);
       expect(await service.run(provider, USER_ID)).toBe('MERGED');
+      expect(encryption.decryptOperations).toHaveBeenCalled();
       expect(opLogSync.forceDownloadRemoteState).toHaveBeenCalled();
+    });
+
+    it('wrong key (probed op does not decrypt): CANCELLED, nothing touched', async () => {
+      remoteOps = [{ op: { isPayloadEncrypted: true } }];
+      encryptKey = 'wrong';
+      encryption.decryptOperations.and.rejectWith(new Error('decrypt'));
+      expect(await service.run(provider, USER_ID)).toBe('CANCELLED');
+      expect(calls).toEqual([]);
     });
 
     it('archive write failure: rejects, no dispatch, marker kept, not done', async () => {
@@ -350,40 +440,58 @@ describe('FirstSyncMergeService', () => {
       expect(calls).not.toContain('clearPending');
       expect(isDone()).toBeFalse();
     });
+
+    it('download failure: rejects, marker kept with downloaded=false', async () => {
+      opLogSync.forceDownloadRemoteState.and.rejectWith(new Error('network'));
+      await expectAsync(service.run(provider, USER_ID)).toBeRejected();
+      expect((pendingInDb as FirstSyncMergePending).downloaded).toBeFalse();
+      expect(calls).not.toContain('dispatch');
+    });
   });
 
   describe('resume', () => {
     it('after download: merges persisted local onto current store, no re-download', async () => {
-      pendingInDb = {
-        userId: USER_ID,
-        local: data([project('pLocal')], [task('t1', { projectId: 'pLocal' })]),
-        downloaded: true,
-        remoteEmpty: false,
-      } satisfies FirstSyncMergePending;
+      pendingInDb = pendingRecord();
       storeState = remoteState;
       expect(await service.runIfNeeded(provider)).toBe('MERGED');
       expect(opLogSync.forceDownloadRemoteState).not.toHaveBeenCalled();
-      expect(auth.getSession).not.toHaveBeenCalled();
       expect(allDispatched().projects.map((p) => p.id)).toEqual(['pLocal']);
       expect(pendingInDb).toBeNull();
       expect(isDone()).toBeTrue();
     });
 
-    it('before download: re-runs the download first', async () => {
-      pendingInDb = {
-        userId: USER_ID,
-        local: data([project('pLocal')]),
+    it('before download: folds current edits in, drops ops of the interrupted download, re-downloads', async () => {
+      pendingInDb = pendingRecord({
         downloaded: false,
-        remoteEmpty: false,
-      } satisfies FirstSyncMergePending;
+        local: data([project('pLocal')]),
+      });
+      // the store still holds local data plus a task created after the failed download
+      storeState = data([project('pLocal')], [task('tNew', { projectId: 'pLocal' })]);
       await service.runIfNeeded(provider);
-      expect(calls.slice(0, 3)).toEqual([
+      expect(calls.slice(0, 6)).toEqual([
+        'savePending:false',
+        'deleteRemoteOps',
         'archiveReset',
+        'resetStore',
         'forceDownload',
         'savePending:true',
       ]);
-      expect(allDispatched().projects.map((p) => p.id)).toEqual(['pLocal']);
+      expect(allDispatched().tasks.map((t) => t.id)).toEqual(['tNew']);
       expect(pendingInDb).toBeNull();
+      // only remote ops written after the merge started are removed
+      const entry = (source: 'local' | 'remote', seq: number): OperationLogEntry =>
+        ({ source, seq }) as OperationLogEntry;
+      expect(deletePredicate!(entry('remote', 51))).toBeTrue();
+      expect(deletePredicate!(entry('remote', 50))).toBeFalse();
+      expect(deletePredicate!(entry('local', 99))).toBeFalse();
+    });
+
+    it('different account in session: rejects, marker kept, nothing touched', async () => {
+      pendingInDb = pendingRecord({ userId: 7 });
+      await expectAsync(service.runIfNeeded(provider)).toBeRejected();
+      expect(calls).toEqual([]);
+      expect(pendingInDb).not.toBeNull();
+      expect(service.isFirstSyncMergePendingOrRequired()).toBeTrue();
     });
 
     it('corrupt snapshot: rejects and clears nothing', async () => {

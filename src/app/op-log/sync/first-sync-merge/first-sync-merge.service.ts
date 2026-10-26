@@ -2,17 +2,21 @@ import { inject, Injectable } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { MatDialog } from '@angular/material/dialog';
 import { firstValueFrom } from 'rxjs';
-import { AppDataComplete, getDefaultMainModelData } from '../../model/model-config';
+import { AppDataComplete, MODEL_CONFIGS } from '../../model/model-config';
 import { OperationSyncCapable } from '../../sync-providers/provider.interface';
 import { SuperSyncAuthService } from '../../sync-providers/super-sync/super-sync-auth.service';
+import { SyncProviderManager } from '../../sync-providers/provider-manager.service';
+import { SyncProviderId } from '../../sync-providers/provider.const';
 import { OperationLogStoreService } from '../../persistence/operation-log-store.service';
 import { OperationLogSyncService } from '../operation-log-sync.service';
 import { OperationWriteFlushService } from '../operation-write-flush.service';
+import { OperationEncryptionService } from '../operation-encryption.service';
 import { StateSnapshotService } from '../../backup/state-snapshot.service';
 import { ArchiveOperationHandler } from '../../apply/archive-operation-handler.service';
 import { ArchiveDbAdapter } from '../../../core/persistence/archive-db-adapter.service';
 import { ArchiveModel } from '../../../features/time-tracking/time-tracking.model';
 import { applyFirstSyncMerge } from '../../../root-store/meta/first-sync-merge.actions';
+import { loadAllData } from '../../../root-store/meta/load-all-data.action';
 import { ActionType } from '../../core/action-types.enum';
 import { ProjectMergeConflictDialogService } from '../../../imex/sync/dialog-project-merge-conflict/project-merge-conflict-dialog.service';
 import { UserInputWaitStateService } from '../../../imex/sync/user-input-wait-state.service';
@@ -23,7 +27,11 @@ import {
 import { SnackService } from '../../../core/snack/snack.service';
 import { T } from '../../../t.const';
 import { OpLog } from '../../../core/log';
-import { buildMergePayload, diffForFirstSync } from './first-sync-merge';
+import {
+  buildMergePayload,
+  diffForFirstSync,
+  foldCurrentIntoSnapshot,
+} from './first-sync-merge';
 import { splitFirstSyncMergePayload } from './first-sync-merge-chunks';
 
 /** 'E2E_MISMATCH': error snackbar already shown, caller must not show another one */
@@ -36,8 +44,8 @@ export type FirstSyncMergePending = {
   local: AppDataComplete;
   /** forceDownloadRemoteState completed */
   downloaded: boolean;
-  /** server had no ops at download time (new account) */
-  remoteEmpty: boolean;
+  /** op-log seq when the merge started: remote ops above it come from this download */
+  opLogSeqAtStart: number;
 };
 
 export const FIRST_SYNC_MERGE_DONE_KEY_PREFIX = 'SUP_FIRST_SYNC_MERGE_DONE_';
@@ -48,12 +56,24 @@ const emptyArchive = (): ArchiveModel => ({
   lastTimeTrackingFlush: 0,
 });
 
+/** Every store slice at its default, except the device's config (sync settings). */
+const defaultStoreData = (): AppDataComplete => {
+  const out: Record<string, unknown> = {};
+  for (const [key, cfg] of Object.entries(MODEL_CONFIGS)) {
+    if (key !== 'globalConfig' && key !== 'archiveYoung' && key !== 'archiveOld') {
+      out[key] = cfg.defaultData;
+    }
+  }
+  return out as AppDataComplete;
+};
+
 const isPending = (v: unknown): v is FirstSyncMergePending => {
   const p = v as Partial<FirstSyncMergePending> | null;
   return (
     !!p &&
     typeof p.userId === 'number' &&
     typeof p.downloaded === 'boolean' &&
+    typeof p.opLogSeqAtStart === 'number' &&
     !!p.local &&
     !!p.local.project &&
     !!p.local.task &&
@@ -71,9 +91,11 @@ const isPending = (v: unknown): v is FirstSyncMergePending => {
 @Injectable({ providedIn: 'root' })
 export class FirstSyncMergeService {
   private _auth = inject(SuperSyncAuthService);
+  private _providerManager = inject(SyncProviderManager);
   private _opLogStore = inject(OperationLogStoreService);
   private _opLogSync = inject(OperationLogSyncService);
   private _writeFlush = inject(OperationWriteFlushService);
+  private _encryption = inject(OperationEncryptionService);
   private _stateSnapshot = inject(StateSnapshotService);
   private _archiveHandler = inject(ArchiveOperationHandler);
   private _archiveDb = inject(ArchiveDbAdapter);
@@ -84,24 +106,46 @@ export class FirstSyncMergeService {
   private _store = inject(Store);
 
   /**
+   * Closed until runIfNeeded has confirmed (this app session) that no merge is
+   * pending or required. Background SuperSync paths (immediate upload, WS download)
+   * must not touch the server while closed.
+   */
+  private _isGateOpen = false;
+
+  isFirstSyncMergePendingOrRequired(): boolean {
+    return !this._isGateOpen;
+  }
+
+  /**
    * Called by SyncWrapperService before every SuperSync sync (under its sync lock).
    * 'SKIPPED' = continue with the normal sync. Errors propagate (pending marker kept).
    */
   async runIfNeeded(provider: OperationSyncCapable): Promise<FirstSyncMergeResult> {
+    this._isGateOpen = false;
+    const result = await this._runIfNeeded(provider);
+    this._isGateOpen = result === 'SKIPPED' || result === 'MERGED';
+    return result;
+  }
+
+  private async _runIfNeeded(
+    provider: OperationSyncCapable,
+  ): Promise<FirstSyncMergeResult> {
     const pending = await this._opLogStore.loadFirstSyncMergePending();
+    const session = await this._auth.getSession();
     if (pending !== null) {
-      await this._resume(provider, pending);
+      await this._resume(provider, pending, session?.userId);
       return 'MERGED';
     }
-    const session = await this._auth.getSession();
     if (!session || this._isDone(session.userId)) {
       return 'SKIPPED';
     }
-    // lastServerSeq is keyed by token, so a re-login resets it: hasSyncedOps catches
-    // devices that synced before this deploy.
+    // lastServerSeq is keyed by token (a re-login resets it), so synced ops count too,
+    // but only if they came from SuperSync: a device that only synced with another
+    // provider has never synced with this account and must still merge.
     if (
       (await provider.getLastServerSeq()) > 0 ||
-      (await this._opLogStore.hasSyncedOps())
+      ((await this._opLogStore.hasSyncedOps()) &&
+        this._providerManager.getLastSyncedProviderId() === SyncProviderId.SuperSync)
     ) {
       this._markDone(session.userId);
       return 'SKIPPED';
@@ -115,64 +159,86 @@ export class FirstSyncMergeService {
   async run(
     provider: OperationSyncCapable,
     userId: number,
-  ): Promise<'MERGED' | 'CANCELLED' | 'E2E_MISMATCH'> {
-    const e2e = await this._checkEncryption(provider);
-    if (e2e !== 'OK') {
-      return e2e;
+  ): Promise<FirstSyncMergeResult> {
+    const probe = await this._probeRemote(provider);
+    if (probe === 'EMPTY') {
+      // New account: the normal sync uploads the whole local state (server seeding).
+      OpLog.normal('[FirstSyncMerge] Remote account is empty, no merge needed');
+      this._markDone(userId);
+      return 'SKIPPED';
+    }
+    if (probe !== 'OK') {
+      return probe;
     }
     const pending: FirstSyncMergePending = {
       userId,
       local: await this._readStore(),
       downloaded: false,
-      remoteEmpty: false,
+      opLogSeqAtStart: await this._opLogStore.getLastSeq(),
     };
     await this._opLogStore.saveFirstSyncMergePending(pending);
     OpLog.normal('[FirstSyncMerge] Pending marker saved');
-    await this._downloadAndMerge(provider, pending);
+    await this._downloadAndMerge(provider, pending, false);
     return 'MERGED';
   }
 
-  private async _resume(provider: OperationSyncCapable, raw: unknown): Promise<void> {
+  private async _resume(
+    provider: OperationSyncCapable,
+    raw: unknown,
+    sessionUserId: number | undefined,
+  ): Promise<void> {
     if (!isPending(raw)) {
       OpLog.err('[FirstSyncMerge] Pending marker has no valid local snapshot');
       throw new Error(
         'First-sync merge could not resume: saved local data is missing or corrupt',
       );
     }
+    if (sessionUserId !== undefined && sessionUserId !== raw.userId) {
+      OpLog.err('[FirstSyncMerge] Pending merge belongs to another account', {
+        pendingUserId: raw.userId,
+        sessionUserId,
+      });
+      throw new Error(
+        'First-sync merge could not resume: it was started for a different account',
+      );
+    }
     OpLog.normal('[FirstSyncMerge] Resuming pending merge', {
       downloaded: raw.downloaded,
     });
-    await this._downloadAndMerge(provider, raw);
+    await this._downloadAndMerge(provider, raw, true);
   }
 
   private async _downloadAndMerge(
     provider: OperationSyncCapable,
     pending: FirstSyncMergePending,
+    isResume: boolean,
   ): Promise<void> {
     if (!pending.downloaded) {
-      // Empty the archive stores so what we read back afterwards is remote-only;
-      // this device's archive is in the snapshot and comes back via the payload.
+      if (isResume) {
+        // keep edits made after a failed/interrupted download
+        pending = {
+          ...pending,
+          local: foldCurrentIntoSnapshot(pending.local, await this._readStore()),
+        };
+        await this._opLogStore.saveFirstSyncMergePending(pending);
+      }
+      // Remote ops logged by an interrupted earlier download would be skipped as
+      // "already applied" after the reset below, leaving an incomplete remote.
+      const seq = pending.opLogSeqAtStart;
+      await this._opLogStore.deleteOpsWhere((e) => e.source === 'remote' && e.seq > seq);
+      // Start from an empty store and empty archives so what we read back afterwards
+      // is remote-only (forceDownloadRemoteState resets only some slices and only
+      // when the server has no full-state op). Local data is in the snapshot.
       await this._archiveDb.saveArchivesAtomic(emptyArchive(), emptyArchive());
+      this._store.dispatch(loadAllData({ appDataComplete: defaultStoreData() }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
       await this._opLogSync.forceDownloadRemoteState(provider);
       await new Promise((resolve) => setTimeout(resolve, 0));
-      pending = {
-        ...pending,
-        downloaded: true,
-        // forceDownloadRemoteState leaves lastServerSeq at 0 only for an empty server
-        remoteEmpty: (await provider.getLastServerSeq()) === 0,
-      };
+      pending = { ...pending, downloaded: true };
       await this._opLogStore.saveFirstSyncMergePending(pending);
     }
 
-    // Empty account: the store still holds local data, so compare against defaults.
-    const remote: AppDataComplete = pending.remoteEmpty
-      ? ({
-          ...getDefaultMainModelData(),
-          archiveYoung: emptyArchive(),
-          archiveOld: emptyArchive(),
-        } as AppDataComplete)
-      : await this._readStore();
-
+    const remote = await this._readStore();
     const { conflicts } = diffForFirstSync(pending.local, remote);
     const choices = conflicts.length ? await this._conflictDialog.open(conflicts) : {};
     const payload = buildMergePayload(pending.local, remote, choices);
@@ -204,36 +270,44 @@ export class FirstSyncMergeService {
     OpLog.normal('[FirstSyncMerge] Merge complete', {
       conflicts: conflicts.length,
       chunks: chunks.length,
-      remoteEmpty: pending.remoteEmpty,
     });
   }
 
   /**
-   * Spec: account E2E without a key here → ask for the key first; E2E on one side
-   * only → not supported. Probes the first server op (encryption resets the server).
+   * Looks at the first server op. Spec: account E2E without a key here → ask for the
+   * key first (a wrong key cancels); E2E on one side only → not supported.
    */
-  private async _checkEncryption(
+  private async _probeRemote(
     provider: OperationSyncCapable,
-  ): Promise<'OK' | 'CANCELLED' | 'E2E_MISMATCH'> {
+  ): Promise<'EMPTY' | 'OK' | 'CANCELLED' | 'E2E_MISMATCH'> {
     const probe = await provider.downloadOps(0, undefined, 1);
     if (!probe.ops.length) {
-      return 'OK';
+      return 'EMPTY';
     }
-    const isRemoteEncrypted = !!probe.ops[0].op.isPayloadEncrypted;
-    let hasKey = !!(await provider.getEncryptKey?.());
-    if (isRemoteEncrypted && !hasKey) {
-      hasKey = await this._promptForKey();
-      if (!hasKey) {
+    const firstOp = probe.ops[0].op;
+    const isRemoteEncrypted = !!firstOp.isPayloadEncrypted;
+    let key = await provider.getEncryptKey?.();
+    if (isRemoteEncrypted && !key) {
+      key = (await this._promptForKey()) ? await provider.getEncryptKey?.() : undefined;
+      if (!key) {
         return 'CANCELLED';
       }
     }
-    if (isRemoteEncrypted !== hasKey) {
-      OpLog.warn('[FirstSyncMerge] E2E mismatch', { isRemoteEncrypted, hasKey });
+    if (isRemoteEncrypted !== !!key) {
+      OpLog.warn('[FirstSyncMerge] E2E mismatch', { isRemoteEncrypted, hasKey: !!key });
       this._snackService.open({
         type: 'ERROR',
         msg: T.F.SYNC.S.FIRST_SYNC_MERGE_E2E_MISMATCH,
       });
       return 'E2E_MISMATCH';
+    }
+    if (isRemoteEncrypted && key) {
+      try {
+        await this._encryption.decryptOperations([firstOp], key);
+      } catch (e) {
+        OpLog.warn('[FirstSyncMerge] Encryption key does not decrypt the remote data');
+        return 'CANCELLED';
+      }
     }
     return 'OK';
   }

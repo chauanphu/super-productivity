@@ -197,7 +197,6 @@ describe('firstSyncMergeMetaReducer', () => {
     });
   });
 
-  /* eslint-disable @typescript-eslint/no-explicit-any */
   it('upserts counters, metrics, reminders, boards, planner, plugins, menuTree', () => {
     const base = {
       ...createState(),
@@ -255,7 +254,6 @@ describe('firstSyncMergeMetaReducer', () => {
     const state = createState();
     expect(() => apply(state, old as FirstSyncMergePayload)).not.toThrow();
   });
-  /* eslint-enable @typescript-eslint/no-explicit-any */
 
   it('is idempotent (replay safe)', () => {
     const payload: FirstSyncMergePayload = {
