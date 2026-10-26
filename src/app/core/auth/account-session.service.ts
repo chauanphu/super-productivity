@@ -23,7 +23,6 @@ import { T } from '../../t.const';
 import { SyncProviderManager } from '../../op-log/sync-providers/provider-manager.service';
 import { SyncProviderId, SyncStatus } from '../../op-log/sync-providers/provider.const';
 import { LAST_SERVER_SEQ_KEY_PREFIX } from '../../op-log/sync-providers/super-sync/super-sync';
-import { SUPER_SYNC_DEFAULT_BASE_URL } from '../../op-log/sync-providers/super-sync/super-sync.model';
 import { FIRST_SYNC_MERGE_DONE_KEY_PREFIX } from '../../op-log/sync/first-sync-merge/first-sync-merge.service';
 import { Log } from '../log';
 import { ActionType } from '../../op-log/core/action-types.enum';
@@ -132,10 +131,11 @@ export class AccountSessionService {
   /** Account identity is (baseUrl, userId). */
   private async _accountChange(s: AuthSession): Promise<'SAME' | 'CHANGED' | 'UNKNOWN'> {
     const cfg = await this._providerManager.getProviderConfig(SyncProviderId.SuperSync);
-    // A token without baseUrl predates per-server config and used the default server.
-    const storedBaseUrl =
-      cfg?.baseUrl || (cfg?.accessToken ? SUPER_SYNC_DEFAULT_BASE_URL : undefined);
-    if (storedBaseUrl && normalizeUrl(storedBaseUrl) !== normalizeUrl(s.baseUrl)) {
+    // A token without baseUrl: the server is unknown, never assume the upstream one.
+    if (cfg?.accessToken && !cfg.baseUrl) {
+      return 'UNKNOWN';
+    }
+    if (cfg?.baseUrl && normalizeUrl(cfg.baseUrl) !== normalizeUrl(s.baseUrl)) {
       return 'CHANGED';
     }
     const previous = await this._previousUserId(cfg);

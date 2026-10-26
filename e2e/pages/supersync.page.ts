@@ -219,10 +219,7 @@ export class SuperSyncPage extends BasePage {
         this.page.waitForEvent('load', { timeout: 30000 }),
         deleteLocalDataBtn.click(),
       ]);
-      // The reload keeps the #/login hash; go home as the new account.
-      await this.page.evaluate(() => {
-        window.location.hash = '#/';
-      });
+      // The login page redirects home once the new session exists.
       await this.page.waitForURL(/#\/(tag|project)\/.+\/tasks/, { timeout: 30000 });
       // The reload dropped the page globals.
       if (this._isBlockingBackgroundSync) {

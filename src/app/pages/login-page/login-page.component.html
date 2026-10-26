@@ -12,6 +12,9 @@
       [(ngModel)]="baseUrl"
     />
   </label>
+  @if (urlErrorKey(); as urlKey) {
+    <p class="hint">{{ urlKey | translate }}</p>
+  }
   <label>
     {{ T.F.SYNC.LOGIN.L_EMAIL | translate }}
     <input
@@ -43,7 +46,7 @@
   <button
     mat-flat-button
     type="submit"
-    [disabled]="isSubmitting()"
+    [disabled]="isSubmitting() || !!urlErrorKey()"
   >
     {{ T.F.SYNC.LOGIN.SUBMIT | translate }}
   </button>

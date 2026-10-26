@@ -353,6 +353,14 @@ describe('AccountSessionService', () => {
         expect(wipe.wipeAll).toHaveBeenCalledWith({ nextSession: next });
       });
 
+      it('a token without stored baseUrl is an unknown account, not the upstream server', async () => {
+        manager.getProviderConfig.and.resolveTo({ accessToken: 'x' } as never);
+        dialogAnswers(true);
+        expect(await service.completeLogin(next)).toBe('DONE');
+        expect(wipe.wipeAll).toHaveBeenCalledWith({ nextSession: next });
+        expect(dialog.open).toHaveBeenCalled();
+      });
+
       it('same userId and same baseUrl (trailing slash ignored) keeps data', async () => {
         manager.getProviderConfig.and.resolveTo({
           baseUrl: 'https://same.example/',
