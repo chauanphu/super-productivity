@@ -268,6 +268,8 @@ export class SuperSyncPage extends BasePage {
 
   /**
    * Logs in through the login page with the test user's email + password.
+   * The page has no server field: the e2e build talks to environment.e2e.ts
+   * `superSyncBaseUrl`, which must equal `config.baseUrl` (SUPERSYNC_BASE_URL).
    * /login redirects home while a session exists, so:
    * - same account + server already signed in: nothing to do ('skipped');
    * - another account/server: log out first (wipes local data), then log in;
@@ -297,7 +299,6 @@ export class SuperSyncPage extends BasePage {
     });
     const form = this.page.locator('login-page form');
     await form.waitFor({ state: 'visible', timeout: 10000 });
-    await form.locator('input[name="baseUrl"]').fill(config.baseUrl);
     await form.locator('input[name="email"]').fill(config.email);
     await form.locator('input[name="password"]').fill(config.accountPassword);
     await form.locator('button[type="submit"]').click();

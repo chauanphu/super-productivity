@@ -7,4 +7,6 @@ export const environment = {
   stage: false,
   version: pkg.version,
   isLoginRequired: false,
+  // The e2e SuperSync server (e2e/utils/supersync-helpers.ts SUPERSYNC_BASE_URL); the app is served elsewhere.
+  superSyncBaseUrl: 'http://localhost:1901',
 };

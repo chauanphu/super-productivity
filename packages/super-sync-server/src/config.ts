@@ -92,6 +92,8 @@ export interface ServerConfig {
    * Required for German legal compliance (Impressum).
    */
   privacy?: PrivacyConfig;
+  /** Built Angular app (browser bundle) to serve at `/` instead of the legacy public/ pages. */
+  webRoot?: string;
   /**
    * Test mode configuration. When enabled, provides endpoints for E2E testing.
    * NEVER enable in production!
@@ -250,6 +252,10 @@ export const loadConfigFromEnv = (
       addressCountry: process.env.PRIVACY_ADDRESS_COUNTRY || '',
       contactEmail: process.env.PRIVACY_CONTACT_EMAIL || '',
     };
+  }
+
+  if (process.env.WEB_ROOT) {
+    config.webRoot = process.env.WEB_ROOT;
   }
 
   // Test mode configuration

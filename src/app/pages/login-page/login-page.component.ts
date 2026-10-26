@@ -17,6 +17,7 @@ import {
   SuperSyncAuthService,
 } from '../../op-log/sync-providers/super-sync/super-sync-auth.service';
 import { AccountSessionService } from '../../core/auth/account-session.service';
+import { SUPER_SYNC_BASE_URL } from '../../op-log/sync-providers/super-sync/resolve-super-sync-base-url';
 
 @Component({
   selector: 'login-page',
@@ -31,8 +32,8 @@ export class LoginPageComponent implements OnInit {
   private _router = inject(Router);
 
   readonly T = T;
-  // Empty on purpose: credentials must never go to a server the user did not type.
-  baseUrl = '';
+  // Null when no server is configured: never fall back to an external host.
+  readonly baseUrl = inject(SUPER_SYNC_BASE_URL);
   email = '';
   password = '';
   readonly isSubmitting = signal(false);
@@ -45,26 +46,12 @@ export class LoginPageComponent implements OnInit {
     }
   }
 
-  urlErrorKey(): string | null {
-    const url = this.baseUrl.trim();
-    if (!url) {
-      return T.F.SYNC.LOGIN.ERR_URL_REQUIRED;
-    }
-    try {
-      return /^https?:$/.test(new URL(url).protocol)
-        ? null
-        : T.F.SYNC.LOGIN.ERR_URL_INVALID;
-    } catch {
-      return T.F.SYNC.LOGIN.ERR_URL_INVALID;
-    }
-  }
-
   async submit(): Promise<void> {
     if (this.isSubmitting()) {
       return;
     }
-    this.errorKey.set(this.urlErrorKey());
-    if (this.errorKey()) {
+    if (!this.baseUrl) {
+      this.errorKey.set(T.F.SYNC.LOGIN.ERR_NO_SERVER);
       return;
     }
     if (!isOnline()) {
@@ -73,11 +60,7 @@ export class LoginPageComponent implements OnInit {
     }
     this.isSubmitting.set(true);
     try {
-      const session = await this._auth.login(
-        this.baseUrl.trim().replace(/\/+$/, ''),
-        this.email,
-        this.password,
-      );
+      const session = await this._auth.login(this.baseUrl, this.email, this.password);
       if ((await this._accountSession.completeLogin(session)) === 'DONE') {
         await this._router.navigateByUrl('/');
       }

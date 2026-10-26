@@ -74,14 +74,122 @@ npm start
 
 All configuration is done via environment variables.
 
-| Variable       | Default                              | Description                                                                     |
-| :------------- | :----------------------------------- | :------------------------------------------------------------------------------ |
-| `PORT`         | `1900`                               | Server port                                                                     |
-| `DATABASE_URL` | -                                    | PostgreSQL connection string (e.g. `postgresql://user:pass@localhost:5432/db`)  |
-| `JWT_SECRET`   | -                                    | **Required.** Secret for signing JWTs (min 32 chars)                            |
-| `PUBLIC_URL`   | -                                    | **Required.** Public URL used for email links (e.g. `https://sync.example.com`) |
-| `CORS_ORIGINS` | `https://app.super-productivity.com` | Allowed CORS origins                                                            |
-| `SMTP_HOST`    | -                                    | SMTP Server for emails                                                          |
+| Variable       | Default                          | Description                                                                     |
+| :------------- | :------------------------------- | :------------------------------------------------------------------------------ |
+| `PORT`         | `1900`                           | Server port                                                                     |
+| `DATABASE_URL` | -                                | PostgreSQL connection string (e.g. `postgresql://user:pass@localhost:5432/db`)  |
+| `JWT_SECRET`   | -                                | **Required.** Secret for signing JWTs (min 32 chars)                            |
+| `PUBLIC_URL`   | -                                | **Required.** Public URL used for email links (e.g. `https://sync.example.com`) |
+| `CORS_ORIGINS` | upstream app origins (see below) | Allowed CORS origins, comma-separated. **Set it** to your app origin            |
+| `SMTP_HOST`    | -                                | SMTP Server for emails                                                          |
+
+| Variable                | Default | Description                                                                                                                                                                                                                                                   |
+| :---------------------- | :------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `WEB_ROOT`              | -       | Directory of the built Angular app (`dist/browser`). When set and it contains `index.html`, the server serves the app at `/` instead of the legacy `public/` pages (and their `/reset-password`, `/verify-email`, `/magic-login`, `/recover-passkey` routes). |
+| `REGISTRATION_DISABLED` | `false` | `true` makes `POST /api/register/passkey/options`, `/api/register/passkey/verify` and `/api/register/magic-link` return `403 {"error":"Registration is disabled"}`. Logins are unaffected. Create users with `set-password` (see Maintenance).                |
+| `ALLOWED_EMAILS`        | -       | Optional registration allowlist: comma-separated emails or `*@domain`.                                                                                                                                                                                        |
+
+`CORS_ORIGINS` defaults to the upstream hosted app (`https://app.super-productivity.com` and its
+preview deployments). A self-hosted server must set it to its own app origin, e.g.
+`CORS_ORIGINS=https://planner.captechvn.com`. When the app is served by this server
+(`WEB_ROOT`) all requests are same-origin and CORS is not involved, but set it anyway so the
+upstream origin is not allowed.
+
+## Deploying at planner.captechvn.com behind nginx-proxy-manager
+
+One container serves both the Angular app and the API on the same origin, plus Postgres.
+No external services. Files: `docker-compose.planner.yml` and `.env.planner.example` at the
+repo root; the image is the `planner` target of `packages/super-sync-server/Dockerfile`
+(it builds the app with `npm run buildFrontend:prodWeb`, copies `dist/browser` to `/app/web`
+and sets `WEB_ROOT=/app/web`; the default target is still the server-only image).
+
+### 1. Configure and start
+
+```bash
+cp .env.planner.example .env.planner
+# Fill in POSTGRES_PASSWORD (openssl rand -hex 24) and JWT_SECRET (openssl rand -hex 32).
+# Keep REGISTRATION_DISABLED=true and CORS_ORIGINS=https://planner.captechvn.com.
+docker compose -f docker-compose.planner.yml --env-file .env.planner up -d --build
+```
+
+The app container (`scripts/docker-start.sh`) runs `prisma migrate deploy` and then the server
+on port 1900. `prisma/migrations` has no initial migration, so on an empty database the script
+first creates the schema with `prisma db push` and marks the existing migrations as applied. The compose
+file publishes it on `127.0.0.1:${APP_PORT:-1900}` only.
+
+**Never expose port 1900 to the internet directly.** The server trusts exactly one proxy hop
+(`trustProxy: 1`, fixed in `src/server.ts`; there is no env var): it takes the client IP from
+the last `X-Forwarded-For` entry, which NPM sets. That is correct with NPM as the single proxy
+in front. A client reaching the port directly could put any IP into `X-Forwarded-For` and
+dodge per-IP rate limits, and it would bypass TLS. If you add another proxy hop (e.g. a CDN in
+front of NPM), the value has to change.
+
+### 2. Create the first user
+
+Self-registration is closed (`REGISTRATION_DISABLED=true`), so the operator creates accounts:
+
+```bash
+docker compose -f docker-compose.planner.yml --env-file .env.planner exec \
+  -e SET_PASSWORD_PASSWORD='a-long-password' app node dist/scripts/set-password.js user@example.com
+```
+
+The same command resets a password (add `--revoke-sessions` to log out all devices).
+
+### 3. nginx-proxy-manager Proxy Host
+
+- **Details**: Domain Names `planner.captechvn.com`; Scheme `http`; Forward Hostname/IP and
+  Port: if NPM runs on the host network, `127.0.0.1` and `1900` (`APP_PORT`). If NPM runs in
+  Docker (usual), `127.0.0.1` is NPM's own container: attach NPM to this project's network
+  (`docker network connect <project>_default <npm-container>`) and forward to `app` : `1900`;
+  then the `ports:` mapping can be removed entirely.
+- Enable **Websockets Support** (the client keeps a websocket at `/api/sync/ws` for live sync
+  notifications) and **Block Common Exploits**. Cache Assets: off (the server sends the right
+  `Cache-Control` headers itself).
+- **SSL**: request a new Let's Encrypt certificate, enable **Force SSL** and **HTTP/2 Support**
+  (HSTS optional).
+- **Advanced** custom Nginx configuration:
+
+  ```nginx
+  # Server body limit is 20 MB for normal routes and 30 MB for POST /api/sync/snapshot
+  # (backup/repair imports); nginx's default of 1 MB would reject large uploads.
+  client_max_body_size 32m;
+  # The server allows up to 80 s per request (snapshot generation); nginx's default is 60 s.
+  # Websocket pings run every 30 s, so 90 s also keeps idle sockets open.
+  proxy_read_timeout 90s;
+  proxy_send_timeout 90s;
+  ```
+
+### 4. Backup and restore
+
+```bash
+docker compose -f docker-compose.planner.yml --env-file .env.planner exec -T db \
+  pg_dump -U planner -d planner -Fc > planner-$(date +%F).dump
+# restore into an empty database:
+docker compose -f docker-compose.planner.yml --env-file .env.planner exec -T db \
+  pg_restore -U planner -d planner --clean --if-exists < planner-YYYY-MM-DD.dump
+```
+
+(Use your `POSTGRES_USER`/`POSTGRES_DB` if you changed them.)
+
+### 5. Upgrade
+
+```bash
+docker compose -f docker-compose.planner.yml --env-file .env.planner exec -T db \
+  pg_dump -U planner -d planner -Fc > planner-before-upgrade.dump
+git pull
+docker compose -f docker-compose.planner.yml --env-file .env.planner up -d --build
+```
+
+Migrations run automatically when the app container starts.
+
+### Desktop (Electron) and Android builds
+
+They have no usable origin (`file://`, `https://localhost`), so they must be built with
+`superSyncBaseUrl: 'https://planner.captechvn.com'` in `src/environments/environment.prod.ts`
+(and `environment.ts`/`environment.stage.ts` for other build types). The web app served by
+this server keeps `superSyncBaseUrl: ''` and uses its own origin. `CORS_ORIGINS` needs no extra
+entry for them: Electron injects CORS response headers itself (`electron/main-window.ts`) and
+Android sends requests through native `CapacitorHttp` (`capacitor.config.ts`).
 
 ## API Endpoints
 
@@ -168,10 +276,17 @@ GET /api/sync/status
 
 ## Client Configuration
 
-In Super Productivity, configure the Custom Sync provider with:
+The login page asks only for email and password; the server is fixed per build:
 
-- **Base URL**: `https://sync.your-domain.com` (or your deployed URL)
-- **Auth Token**: JWT token from login
+- The client uses `superSyncBaseUrl` from `src/environments/environment*.ts`, or, if it is
+  empty, the origin that serves the app (`http:`/`https:` pages only). No external host is
+  ever used as a fallback; without either, the login page shows "Server not configured".
+- Simplest deployment: one reverse proxy that serves the built Angular app at `/` and this
+  server under `/api` on the same origin. No CORS setup needed.
+- If the app and the server are on different origins, set `superSyncBaseUrl` and configure
+  CORS on the server to allow the app's origin.
+- Electron and Android builds have no usable origin (`file://`, `https://localhost`), so
+  they must set `superSyncBaseUrl`.
 
 ## Maintenance
 
