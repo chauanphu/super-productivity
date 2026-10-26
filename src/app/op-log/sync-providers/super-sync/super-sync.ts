@@ -35,7 +35,7 @@ import {
   validateDeleteAllDataResponse,
 } from './response-validators';
 
-const LAST_SERVER_SEQ_KEY_PREFIX = 'super_sync_last_server_seq_';
+export const LAST_SERVER_SEQ_KEY_PREFIX = 'super_sync_last_server_seq_';
 
 /**
  * Timeout for individual HTTP requests to SuperSync server.

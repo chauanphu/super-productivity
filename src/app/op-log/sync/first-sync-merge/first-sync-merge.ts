@@ -18,6 +18,7 @@ import { BoardCfg } from '../../../features/boards/boards.model';
 import { DEFAULT_BOARDS } from '../../../features/boards/boards.const';
 import { MenuTreeState } from '../../../features/menu-tree/store/menu-tree.model';
 import { menuTreeInitialState } from '../../../features/menu-tree/store/menu-tree.reducer';
+import { MultiEntityPayload, OperationLogEntry } from '../../core/operation.types';
 import {
   PluginMetadata,
   PluginUserData,
@@ -379,25 +380,70 @@ export const buildMergePayload = (
   };
 };
 
+/** Entity slices whose items can be replaced by a fold, keyed by op entity type. */
+const FOLD_SLICE_BY_ENTITY_TYPE = {
+  TASK: 'task',
+  PROJECT: 'project',
+  TAG: 'tag',
+  NOTE: 'note',
+  TASK_REPEAT_CFG: 'taskRepeatCfg',
+  ISSUE_PROVIDER: 'issueProvider',
+  SIMPLE_COUNTER: 'simpleCounter',
+  METRIC: 'metric',
+} as const;
+type FoldSlice =
+  (typeof FOLD_SLICE_BY_ENTITY_TYPE)[keyof typeof FOLD_SLICE_BY_ENTITY_TYPE];
+export type TouchedIds = Partial<Record<FoldSlice, Set<string>>>;
+
+/**
+ * IDs this device's user edited since the merge started: entities of LOCAL ops with
+ * seq > sinceSeq (remote-replayed ops are ignored).
+ */
+export const localEditIdsSince = (
+  entries: readonly OperationLogEntry[],
+  sinceSeq: number,
+): TouchedIds => {
+  const out: TouchedIds = {};
+  const add = (type: string, id: string | undefined): void => {
+    const slice =
+      FOLD_SLICE_BY_ENTITY_TYPE[type as keyof typeof FOLD_SLICE_BY_ENTITY_TYPE];
+    if (slice && id) (out[slice] ??= new Set()).add(id);
+  };
+  for (const e of entries) {
+    if (e.source !== 'local' || e.seq <= sinceSeq) continue;
+    add(e.op.entityType, e.op.entityId);
+    for (const id of e.op.entityIds ?? []) add(e.op.entityType, id);
+    const changes = (e.op.payload as Partial<MultiEntityPayload> | undefined)
+      ?.entityChanges;
+    for (const c of changes ?? []) add(c.entityType, c.entityId);
+  }
+  return out;
+};
+
 /**
  * Resume after an interrupted download: brings edits made since the snapshot back
  * into it. By ID, additive: items missing in the snapshot are added, an item present
  * in both is replaced only when the current copy has a newer `modified`.
+ * With `touched`, entity slices only take those IDs (the user's own edits), so
+ * remote-replayed entities in the current store never replace or join the snapshot.
+ * Arrays, planner days and time tracking only gain entries the snapshot lacks.
  */
 export const foldCurrentIntoSnapshot = (
   snapshot: AppDataComplete,
   current: AppDataComplete,
+  touched?: TouchedIds,
 ): AppDataComplete => {
   type Ent = { id: string; modified?: number };
   type ES = { ids: (string | number)[]; entities: Record<string, Ent | undefined> };
-  const foldEntities = <S>(snap: S, cur: S): S => {
+  const foldEntities = <S>(snap: S, cur: S, slice: FoldSlice): S => {
     const sn = snap as unknown as ES | undefined;
     const cu = cur as unknown as ES | undefined;
     if (!sn || !cu) return snap ?? cur;
+    const allowed = touched ? (touched[slice] ?? new Set<string>()) : undefined;
     const entities = { ...sn.entities };
     const ids = [...sn.ids];
     for (const e of Object.values(cu.entities)) {
-      if (!e) continue;
+      if (!e || (allowed && !allowed.has(e.id))) continue;
       const old = entities[e.id];
       if (!old) ids.push(e.id);
       if (!old || (e.modified ?? 0) > (old.modified ?? 0)) entities[e.id] = e;
@@ -428,20 +474,32 @@ export const foldCurrentIntoSnapshot = (
     cur: AppDataComplete['archiveYoung'] | undefined,
   ): AppDataComplete['archiveYoung'] => ({
     ...snap,
-    task: foldEntities(snap.task, cur?.task ?? snap.task),
+    task: foldEntities(snap.task, cur?.task ?? snap.task, 'task'),
     timeTracking: foldTt(snap.timeTracking, cur?.timeTracking),
   });
 
   return {
     ...snapshot,
-    task: foldEntities(snapshot.task, current.task),
-    project: foldEntities(snapshot.project, current.project),
-    tag: foldEntities(snapshot.tag, current.tag),
-    note: foldEntities(snapshot.note, current.note),
-    taskRepeatCfg: foldEntities(snapshot.taskRepeatCfg, current.taskRepeatCfg),
-    issueProvider: foldEntities(snapshot.issueProvider, current.issueProvider),
-    simpleCounter: foldEntities(snapshot.simpleCounter, current.simpleCounter),
-    metric: foldEntities(snapshot.metric, current.metric),
+    task: foldEntities(snapshot.task, current.task, 'task'),
+    project: foldEntities(snapshot.project, current.project, 'project'),
+    tag: foldEntities(snapshot.tag, current.tag, 'tag'),
+    note: foldEntities(snapshot.note, current.note, 'note'),
+    taskRepeatCfg: foldEntities(
+      snapshot.taskRepeatCfg,
+      current.taskRepeatCfg,
+      'taskRepeatCfg',
+    ),
+    issueProvider: foldEntities(
+      snapshot.issueProvider,
+      current.issueProvider,
+      'issueProvider',
+    ),
+    simpleCounter: foldEntities(
+      snapshot.simpleCounter,
+      current.simpleCounter,
+      'simpleCounter',
+    ),
+    metric: foldEntities(snapshot.metric, current.metric, 'metric'),
     timeTracking: foldTt(snapshot.timeTracking, current.timeTracking),
     reminders: foldArray(snapshot.reminders, current.reminders),
     boards: {

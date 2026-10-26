@@ -3,7 +3,9 @@ import {
   diffForFirstSync,
   FirstSyncMergePayload,
   foldCurrentIntoSnapshot,
+  localEditIdsSince,
 } from './first-sync-merge';
+import { OperationLogEntry } from '../../core/operation.types';
 import { DEFAULT_SIMPLE_COUNTERS } from '../../../features/simple-counter/simple-counter.const';
 import { SimpleCounter } from '../../../features/simple-counter/simple-counter.model';
 import { DEFAULT_BOARDS } from '../../../features/boards/boards.const';
@@ -541,11 +543,64 @@ describe('first-sync-merge', () => {
       expect(f.archiveYoung.task.ids).toEqual(['arch']);
     });
 
+    it('with touched ids: only those entities are folded', () => {
+      const snap = data({ tasks: [task('a', { modified: 1, title: 'snap' })] });
+      const cur = data({
+        tasks: [
+          task('a', { modified: 9, title: 'replayed' }),
+          task('mine'),
+          task('remoteOnly'),
+        ],
+        archive: [task('archMine'), task('archRemote')],
+      });
+      const f = foldCurrentIntoSnapshot(snap, cur, {
+        task: new Set(['mine', 'archMine']),
+      });
+      expect(f.task.ids).toEqual(['a', 'mine']);
+      expect(f.task.entities['a']!.title).toBe('snap');
+      expect(f.archiveYoung.task.ids).toEqual(['archMine']);
+    });
+
     it('never removes snapshot items', () => {
       const snap = data({ projects: [project('p')], notes: [note('n', null)] });
       const f = foldCurrentIntoSnapshot(snap, data());
       expect(f.project.ids).toEqual(['p']);
       expect(f.note.ids).toEqual(['n']);
+    });
+  });
+
+  describe('localEditIdsSince', () => {
+    it('collects ids of local ops after the seq, incl. entityIds and entityChanges', () => {
+      const e = (o: object): OperationLogEntry => o as OperationLogEntry;
+      const touched = localEditIdsSince(
+        [
+          e({ seq: 5, source: 'local', op: { entityType: 'TASK', entityId: 'old' } }),
+          e({ seq: 11, source: 'remote', op: { entityType: 'TASK', entityId: 'r' } }),
+          e({
+            seq: 12,
+            source: 'local',
+            op: { entityType: 'TASK', entityIds: ['a', 'b'] },
+          }),
+          e({
+            seq: 13,
+            source: 'local',
+            op: {
+              entityType: 'TASK',
+              entityId: 'c',
+              payload: { entityChanges: [{ entityType: 'PROJECT', entityId: 'p' }] },
+            },
+          }),
+          e({
+            seq: 14,
+            source: 'local',
+            op: { entityType: 'GLOBAL_CONFIG', entityId: 'x' },
+          }),
+        ],
+        10,
+      );
+      expect([...(touched.task ?? [])].sort()).toEqual(['a', 'b', 'c']);
+      expect([...(touched.project ?? [])]).toEqual(['p']);
+      expect(Object.keys(touched).sort()).toEqual(['project', 'task']);
     });
   });
 });

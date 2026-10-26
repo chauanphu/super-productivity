@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import { AppDataComplete, MODEL_CONFIGS } from '../../model/model-config';
 import { OperationSyncCapable } from '../../sync-providers/provider.interface';
 import { SuperSyncAuthService } from '../../sync-providers/super-sync/super-sync-auth.service';
+import { LAST_SERVER_SEQ_KEY_PREFIX } from '../../sync-providers/super-sync/super-sync';
 import { SyncProviderManager } from '../../sync-providers/provider-manager.service';
 import { SyncProviderId } from '../../sync-providers/provider.const';
 import { OperationLogStoreService } from '../../persistence/operation-log-store.service';
@@ -31,6 +32,7 @@ import {
   buildMergePayload,
   diffForFirstSync,
   foldCurrentIntoSnapshot,
+  localEditIdsSince,
 } from './first-sync-merge';
 import { splitFirstSyncMergePayload } from './first-sync-merge-chunks';
 
@@ -65,6 +67,34 @@ const defaultStoreData = (): AppDataComplete => {
     }
   }
   return out as AppDataComplete;
+};
+
+/**
+ * The remote state can only be read back from the store in the app session that ran
+ * the download: neither the pre-download reset nor forceDownloadRemoteState's reset
+ * is persisted, so after a restart the store is the old local cache plus replayed
+ * remote ops. Any resume without a download in this session downloads again, and
+ * folds in the user's own edits made since the merge started.
+ */
+export const planFirstSyncResume = (
+  downloadedThisSession: boolean,
+): { redownload: boolean; foldLocalEdits: boolean } =>
+  downloadedThisSession
+    ? { redownload: false, foldLocalEdits: false }
+    : { redownload: true, foldLocalEdits: true };
+
+/** Any SuperSync account/server this device ever synced with (lastServerSeq > 0). */
+const hasAnySuperSyncServerSeq = (): boolean => {
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (
+      key?.startsWith(LAST_SERVER_SEQ_KEY_PREFIX) &&
+      parseInt(localStorage.getItem(key) ?? '0', 10) > 0
+    ) {
+      return true;
+    }
+  }
+  return false;
 };
 
 const isPending = (v: unknown): v is FirstSyncMergePending => {
@@ -112,6 +142,9 @@ export class FirstSyncMergeService {
    */
   private _isGateOpen = false;
 
+  /** set once the reset + forceDownloadRemoteState ran in THIS app session */
+  private _downloadedThisSession = false;
+
   isFirstSyncMergePendingOrRequired(): boolean {
     return !this._isGateOpen;
   }
@@ -139,13 +172,16 @@ export class FirstSyncMergeService {
     if (!session || this._isDone(session.userId)) {
       return 'SKIPPED';
     }
-    // lastServerSeq is keyed by token (a re-login resets it), so synced ops count too,
-    // but only if they came from SuperSync: a device that only synced with another
-    // provider has never synced with this account and must still merge.
+    // lastServerSeq is keyed by token (a re-login resets it), so any stored SuperSync
+    // seq and synced ops count too. Synced ops only from ANOTHER provider do not:
+    // that device never synced with this account and must still merge.
+    // (Unknown last provider = synced before SP_LAST_SYNCED_PROVIDER_ID existed.)
+    const lastSynced = this._providerManager.getLastSyncedProviderId();
     if (
       (await provider.getLastServerSeq()) > 0 ||
-      ((await this._opLogStore.hasSyncedOps()) &&
-        this._providerManager.getLastSyncedProviderId() === SyncProviderId.SuperSync)
+      hasAnySuperSyncServerSeq() ||
+      ((lastSynced === SyncProviderId.SuperSync || lastSynced === null) &&
+        (await this._opLogStore.hasSyncedOps()))
     ) {
       this._markDone(session.userId);
       return 'SKIPPED';
@@ -213,27 +249,40 @@ export class FirstSyncMergeService {
     pending: FirstSyncMergePending,
     isResume: boolean,
   ): Promise<void> {
-    if (!pending.downloaded) {
-      if (isResume) {
-        // keep edits made after a failed/interrupted download
+    const plan = isResume
+      ? planFirstSyncResume(this._downloadedThisSession)
+      : { redownload: true, foldLocalEdits: false };
+    if (plan.redownload) {
+      const seq = pending.opLogSeqAtStart;
+      // Remote ops logged by an earlier (interrupted or previous-session) download
+      // would be skipped as "already applied" after the reset below.
+      await this._opLogStore.deleteOpsWhere((e) => e.source === 'remote' && e.seq > seq);
+      if (plan.foldLocalEdits) {
+        // only the user's own edits since the merge started, never replayed remote data
+        const touched = localEditIdsSince(
+          await this._opLogStore.getOpsAfterSeq(seq),
+          seq,
+        );
         pending = {
           ...pending,
-          local: foldCurrentIntoSnapshot(pending.local, await this._readStore()),
+          local: foldCurrentIntoSnapshot(pending.local, await this._readStore(), touched),
         };
         await this._opLogStore.saveFirstSyncMergePending(pending);
       }
-      // Remote ops logged by an interrupted earlier download would be skipped as
-      // "already applied" after the reset below, leaving an incomplete remote.
-      const seq = pending.opLogSeqAtStart;
-      await this._opLogStore.deleteOpsWhere((e) => e.source === 'remote' && e.seq > seq);
-      // Start from an empty store and empty archives so what we read back afterwards
-      // is remote-only (forceDownloadRemoteState resets only some slices and only
-      // when the server has no full-state op). Local data is in the snapshot.
-      await this._archiveDb.saveArchivesAtomic(emptyArchive(), emptyArchive());
-      this._store.dispatch(loadAllData({ appDataComplete: defaultStoreData() }));
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      await this._opLogSync.forceDownloadRemoteState(provider);
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      try {
+        // Start from an empty store and empty archives so what we read back is
+        // remote-only (forceDownloadRemoteState resets only some slices and only when
+        // the server has no full-state op). Local data is in the snapshot.
+        await this._archiveDb.saveArchivesAtomic(emptyArchive(), emptyArchive());
+        this._store.dispatch(loadAllData({ appDataComplete: defaultStoreData() }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await this._opLogSync.forceDownloadRemoteState(provider);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      } catch (e) {
+        await this._restoreLocal(pending.local);
+        throw e;
+      }
+      this._downloadedThisSession = true;
       pending = { ...pending, downloaded: true };
       await this._opLogStore.saveFirstSyncMergePending(pending);
     }
@@ -273,6 +322,26 @@ export class FirstSyncMergeService {
     });
   }
 
+  /** Download failed after the reset: show the local snapshot again (marker kept). */
+  private async _restoreLocal(local: AppDataComplete): Promise<void> {
+    try {
+      await this._archiveDb.saveArchivesAtomic(local.archiveYoung, local.archiveOld);
+      // keep the current config (this device's sync settings)
+      this._store.dispatch(
+        loadAllData({
+          appDataComplete: {
+            ...local,
+            globalConfig: undefined,
+          } as unknown as AppDataComplete,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      OpLog.normal('[FirstSyncMerge] Restored local snapshot after failed download');
+    } catch (e) {
+      OpLog.err('[FirstSyncMerge] Could not restore local snapshot', e);
+    }
+  }
+
   /**
    * Looks at the first server op. Spec: account E2E without a key here → ask for the
    * key first (a wrong key cancels); E2E on one side only → not supported.
@@ -281,8 +350,13 @@ export class FirstSyncMergeService {
     provider: OperationSyncCapable,
   ): Promise<'EMPTY' | 'OK' | 'CANCELLED' | 'E2E_MISMATCH'> {
     const probe = await provider.downloadOps(0, undefined, 1);
-    if (!probe.ops.length) {
+    if (!probe.ops.length && probe.latestSeq === 0) {
       return 'EMPTY';
+    }
+    if (!probe.ops.length) {
+      // server has data but returned no op to inspect: take the merge path (the
+      // snapshot is persisted; a decrypt failure restores it and surfaces the error)
+      return 'OK';
     }
     const firstOp = probe.ops[0].op;
     const isRemoteEncrypted = !!firstOp.isPayloadEncrypted;
