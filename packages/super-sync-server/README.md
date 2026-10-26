@@ -295,7 +295,7 @@ The login page asks only for email and password; the server is fixed per build:
 The server includes scripts for administrative tasks. These use the configured database.
 
 ```bash
-# Create a user or set/reset a password (10 chars to 72 bytes; user is marked verified).
+# Create a user or set/reset a password (6 chars to 72 bytes; user is marked verified).
 # Run `pg_dump` before deploying a new version.
 # Development (ts-node):
 npm run set-password -- user@example.com 'a-long-password'
