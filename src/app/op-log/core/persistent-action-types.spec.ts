@@ -20,6 +20,7 @@ import {
 import { addTag, updateTag, deleteTag } from '../../features/tag/store/tag.actions';
 import { addNote, updateNote, deleteNote } from '../../features/note/store/note.actions';
 import { updateGlobalConfigSection } from '../../features/config/store/global-config.actions';
+import { applyFirstSyncMerge } from '../../root-store/meta/first-sync-merge.actions';
 
 describe('Persistent Action Types Stability', () => {
   /**
@@ -68,6 +69,10 @@ describe('Persistent Action Types Stability', () => {
 
     it('Archive flush action should have stable type', () => {
       expect(flushYoungToOld.type).toBe('[Archive] Flush Young to Old');
+    });
+
+    it('First-sync merge action should have stable type', () => {
+      expect(applyFirstSyncMerge.type).toBe('[Sync] Apply first-sync merge');
     });
   });
 

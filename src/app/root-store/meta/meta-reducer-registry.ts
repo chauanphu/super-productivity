@@ -15,6 +15,7 @@ import { taskRepeatCfgSharedMetaReducer } from './task-shared-meta-reducers/task
 import { plannerSharedMetaReducer } from './task-shared-meta-reducers/planner-shared.reducer';
 import { shortSyntaxSharedMetaReducer } from './task-shared-meta-reducers/short-syntax-shared.reducer';
 import { lwwUpdateMetaReducer } from './task-shared-meta-reducers/lww-update.meta-reducer';
+import { firstSyncMergeMetaReducer } from './first-sync-merge.meta-reducer';
 import { actionLoggerReducer } from './action-logger.reducer';
 
 /**
@@ -60,6 +61,7 @@ import { actionLoggerReducer } from './action-logger.reducer';
  * ## Phase 7: Synthetic Multi-Step Operations
  * - shortSyntax: Combines multiple operations atomically
  * - lwwUpdate: Conflict resolution entity replacement
+ * - firstSyncMerge: Upserts a first-sync merge payload (many entity types, one op)
  * Must run LAST (before logging) to handle composed operations.
  *
  * ## Phase 8: Logging (MUST BE LAST)
@@ -115,6 +117,7 @@ export const META_REDUCERS: MetaReducer[] = [
   // ═══════════════════════════════════════════════════════════════════════════
   shortSyntaxSharedMetaReducer, // Atomic multi-step short syntax operations
   lwwUpdateMetaReducer, // Conflict resolution entity replacement
+  firstSyncMergeMetaReducer, // First-sync merge payload upsert
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PHASE 8: LOGGING (MUST BE LAST - INNERMOST)

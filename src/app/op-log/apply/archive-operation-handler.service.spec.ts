@@ -15,6 +15,8 @@ import { TimeTrackingService } from '../../features/time-tracking/time-tracking.
 import { loadAllData } from '../../root-store/meta/load-all-data.action';
 import { ArchiveDbAdapter } from '../../core/persistence/archive-db-adapter.service';
 import { OpType } from '../core/operation.types';
+import { applyFirstSyncMerge } from '../../root-store/meta/first-sync-merge.actions';
+import { TaskCopy } from '../../features/tasks/task.model';
 
 describe('isArchiveAffectingAction', () => {
   it('should return true for moveToArchive action', () => {
@@ -478,6 +480,69 @@ describe('ArchiveOperationHandler', () => {
     // Note: flushYoungToOld tests require module mocking which is complex in Jasmine.
     // The core functionality is tested through integration tests.
     // These tests verify the handler recognizes the action type.
+    describe('applyFirstSyncMerge action', () => {
+      const payloadWith = (archiveTasks: TaskCopy[]): PersistentAction =>
+        applyFirstSyncMerge({
+          payload: {
+            projects: [],
+            tasks: [],
+            tags: [],
+            notes: [],
+            taskRepeatCfgs: [],
+            issueProviders: [],
+            timeTracking: { project: {}, tag: {} },
+            globalConfig: null,
+            archiveTasks,
+          },
+        }) as PersistentAction;
+
+      [false, true].forEach((isRemote) => {
+        it(`upserts archiveTasks into archiveYoung (isRemote=${isRemote}), idempotent`, async () => {
+          let young: ArchiveModel = {
+            ...createEmptyArchiveModel(),
+            task: {
+              ids: ['b'],
+              entities: { b: createMockTask('b') },
+            },
+          };
+          mockArchiveDbAdapter.loadArchiveYoung.and.callFake(() =>
+            Promise.resolve(young),
+          );
+          mockArchiveDbAdapter.saveArchiveYoung.and.callFake((a: ArchiveModel) => {
+            young = a;
+            return Promise.resolve();
+          });
+          const base = payloadWith([
+            createMockTask('c') as TaskCopy,
+            { ...createMockTask('b'), title: 'new b' } as TaskCopy,
+          ]);
+          const action = {
+            ...base,
+            meta: { ...base.meta, isRemote },
+          } as PersistentAction;
+
+          await service.handleOperation(action);
+          const once = young;
+          await service.handleOperation(action);
+
+          expect(once.task.ids).toEqual(['b', 'c']);
+          expect(once.task.entities['b']!.title).toBe('new b');
+          expect(young).toEqual(once);
+        });
+      });
+
+      it('skips tasks already in archiveOld and does not write when empty', async () => {
+        mockArchiveDbAdapter.loadArchiveOld.and.returnValue(
+          Promise.resolve({
+            ...createEmptyArchiveModel(),
+            task: { ids: ['o'], entities: { o: createMockTask('o') } },
+          }),
+        );
+        await service.handleOperation(payloadWith([createMockTask('o') as TaskCopy]));
+        expect(mockArchiveDbAdapter.saveArchiveYoung).not.toHaveBeenCalled();
+      });
+    });
+
     describe('flushYoungToOld action', () => {
       it('should recognize the flushYoungToOld action type', async () => {
         const timestamp = Date.now();

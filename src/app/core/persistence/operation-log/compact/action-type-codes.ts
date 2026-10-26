@@ -206,6 +206,7 @@ export const ACTION_TYPE_TO_CODE: Record<ActionType, string> = {
   [ActionType.LOAD_BACKUP_DATA]: 'YB',
   [ActionType.MIGRATION_GENESIS_IMPORT]: 'YM',
   [ActionType.RECOVERY_DATA_IMPORT]: 'YR',
+  [ActionType.SYNC_APPLY_FIRST_SYNC_MERGE]: 'YF',
 
   // Repair actions (Z)
   [ActionType.REPAIR_AUTO]: 'ZR',

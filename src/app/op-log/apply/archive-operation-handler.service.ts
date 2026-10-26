@@ -22,6 +22,8 @@ import { ArchiveModel } from '../../features/archive/archive.model';
 import { ArchiveDbAdapter } from '../../core/persistence/archive-db-adapter.service';
 import { OpType } from '../core/operation.types';
 import { confirmDialog } from '../../util/native-dialogs';
+import { applyFirstSyncMerge } from '../../root-store/meta/first-sync-merge.actions';
+import { taskAdapter } from '../../features/tasks/store/task.reducer';
 
 /**
  * Creates an empty ArchiveModel with default values.
@@ -50,6 +52,7 @@ const ARCHIVE_AFFECTING_ACTION_TYPES: string[] = [
   TaskSharedActions.deleteIssueProvider.type,
   TaskSharedActions.deleteIssueProviders.type,
   loadAllData.type, // For SYNC_IMPORT/BACKUP_IMPORT handling
+  applyFirstSyncMerge.type,
 ];
 
 /**
@@ -185,6 +188,10 @@ export class ArchiveOperationHandler {
 
       case loadAllData.type:
         await this._handleLoadAllData(action);
+        break;
+
+      case applyFirstSyncMerge.type:
+        await this._handleFirstSyncMerge(action);
         break;
     }
   }
@@ -438,6 +445,32 @@ export class ArchiveOperationHandler {
         isRemote ? { isIgnoreDBLock: true } : undefined,
       );
     }
+  }
+
+  /**
+   * Upserts the merge payload's archiveTasks into archiveYoung (by ID, idempotent).
+   * Tasks already in archiveOld are skipped so no task lives in both archives.
+   *
+   * @localBehavior Executes - nothing writes the archive before dispatch
+   * @remoteBehavior Executes - Uses ArchiveDbAdapter for direct IndexedDB access
+   */
+  private async _handleFirstSyncMerge(action: PersistentAction): Promise<void> {
+    const { archiveTasks } = (action as ReturnType<typeof applyFirstSyncMerge>).payload;
+    if (!archiveTasks.length) return;
+    const archiveOld = await this._archiveDbAdapter.loadArchiveOld();
+    const toWrite = archiveTasks.filter((t) => !archiveOld?.task.entities[t.id]);
+    if (!toWrite.length) return;
+    const archiveYoung =
+      (await this._archiveDbAdapter.loadArchiveYoung()) ?? createEmptyArchiveModel();
+    const task = taskAdapter.setMany(toWrite, archiveYoung.task);
+    // sorted ids keep archives identical across clients (as writeTasksToArchiveForRemoteSync)
+    await this._archiveDbAdapter.saveArchiveYoung({
+      ...archiveYoung,
+      task: { ...task, ids: [...(task.ids as string[])].sort() },
+    });
+    OpLog.log('[ArchiveOperationHandler] Wrote first-sync merge archive tasks', {
+      count: toWrite.length,
+    });
   }
 
   /**

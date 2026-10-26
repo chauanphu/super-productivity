@@ -186,6 +186,7 @@ export enum ActionType {
   LOAD_BACKUP_DATA = '[SP_ALL] Load(import) backup file',
   MIGRATION_GENESIS_IMPORT = '[Migration] Genesis Import',
   RECOVERY_DATA_IMPORT = '[Recovery] Data Recovery Import',
+  SYNC_APPLY_FIRST_SYNC_MERGE = '[Sync] Apply first-sync merge',
 
   // Repair actions (Z)
   REPAIR_AUTO = '[Repair] Auto Repair',
