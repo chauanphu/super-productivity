@@ -185,13 +185,112 @@ export class SuperSyncPage extends BasePage {
   }
 
   /**
+   * The stored SuperSync session (token + server), read from the credential store
+   * the app uses (IndexedDB `sup-sync`). null when there is no token.
+   */
+  private async _readStoredSession(): Promise<{ email: string; baseUrl: string } | null> {
+    const cfg = await this.page.evaluate(
+      () =>
+        new Promise<{ accessToken?: string; baseUrl?: string } | null>((resolve) => {
+          const req = indexedDB.open('sup-sync');
+          // Never create the DB here: the app's own upgrade would then not run.
+          req.onupgradeneeded = () => req.transaction?.abort();
+          req.onerror = () => resolve(null);
+          req.onsuccess = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains('credentials')) {
+              db.close();
+              resolve(null);
+              return;
+            }
+            const get = db
+              .transaction('credentials', 'readonly')
+              .objectStore('credentials')
+              .get('__sp_cred_SuperSync');
+            get.onsuccess = () => {
+              db.close();
+              resolve(get.result ?? null);
+            };
+            get.onerror = () => {
+              db.close();
+              resolve(null);
+            };
+          };
+        }),
+    );
+    const payload = cfg?.accessToken?.split('.')[1];
+    if (!payload) {
+      return null;
+    }
+    try {
+      const { email } = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+      return {
+        email: typeof email === 'string' ? email : '',
+        baseUrl: cfg?.baseUrl ?? '',
+      };
+    } catch {
+      return { email: '', baseUrl: cfg?.baseUrl ?? '' };
+    }
+  }
+
+  /**
+   * Logs out through the sync settings dialog. An unverified wipe asks for
+   * confirmation (with a backup option); that is confirmed. Ends after the reload.
+   */
+  private async _logoutViaSettings(): Promise<void> {
+    await this.ensureOverlaysClosed();
+    await this.syncBtn.click({ button: 'right', noWaitAfter: true });
+    const logoutBtn = this.page.locator('dialog-sync-cfg button', { hasText: 'Log out' });
+    await logoutBtn.waitFor({ state: 'visible', timeout: 10000 });
+    const reloaded = this.page.waitForEvent('load', { timeout: 60000 });
+    await logoutBtn.click();
+    const deleteLocalDataBtn = this.page.locator('dialog-confirm button', {
+      hasText: 'Delete local data',
+    });
+    const outcome = await Promise.race([
+      reloaded.then(() => 'reloaded' as const),
+      deleteLocalDataBtn
+        .waitFor({ state: 'visible', timeout: 60000 })
+        .then(() => 'confirm_wipe' as const)
+        .catch(() => 'reloaded' as const),
+    ]);
+    if (outcome === 'confirm_wipe') {
+      await deleteLocalDataBtn.click();
+    }
+    await reloaded;
+    // The e2e build has no login gate: the app reloads onto the work view.
+    await this.page.waitForURL(/#\/(tag|project)\/.+\/tasks/, { timeout: 30000 });
+    // The reload dropped the page globals.
+    if (this._isBlockingBackgroundSync) {
+      await this._setE2eBlockFlags();
+    }
+  }
+
+  /**
    * Logs in through the login page with the test user's email + password.
+   * /login redirects home while a session exists, so:
+   * - same account + server already signed in: nothing to do ('skipped');
+   * - another account/server: log out first (wipes local data), then log in;
+   * - no session: log in.
    * Switching from another account asks to delete local data; that is confirmed
    * and the app reloads into the new account.
    */
   async loginViaPage(
     config: Pick<SuperSyncConfig, 'baseUrl' | 'email' | 'accountPassword'>,
-  ): Promise<void> {
+  ): Promise<'skipped' | 'logged_in'> {
+    const session = await this._readStoredSession();
+    if (session) {
+      const norm = (u: string): string => u.replace(/\/+$/, '');
+      const isSame =
+        !!session.baseUrl &&
+        norm(session.baseUrl) === norm(config.baseUrl) &&
+        session.email.toLowerCase() === config.email.toLowerCase();
+      if (isSame) {
+        return 'skipped';
+      }
+      await this._logoutViaSettings();
+    }
+
     // Hash navigation keeps the page (and the e2e globals set on it) alive.
     await this.page.evaluate(() => {
       window.location.hash = '#/login';
@@ -226,6 +325,7 @@ export class SuperSyncPage extends BasePage {
         await this._setE2eBlockFlags();
       }
     }
+    return 'logged_in';
   }
 
   async setupSuperSync(config: SuperSyncConfig): Promise<void> {
@@ -328,7 +428,15 @@ export class SuperSyncPage extends BasePage {
       .catch(() => {});
 
     // SuperSync sessions only start through the login page (no raw token field).
-    await this.loginViaPage(config);
+    // With the same session already stored, re-enable sync by saving the sync
+    // settings (as before the login page existed): save() enables it and syncs.
+    if ((await this.loginViaPage(config)) === 'skipped') {
+      await this.syncBtn.click({ button: 'right', noWaitAfter: true });
+      await this.providerSelect.waitFor({ state: 'visible', timeout: 10000 });
+      await this.selectSuperSyncProviderWithRetry();
+      await expect(this.saveBtn).toBeEnabled({ timeout: 5000 });
+      await this.saveBtn.click();
+    }
 
     // Store the encryption password so syncAndWait() can handle dialogs mid-test
     if (config.password) {
@@ -341,8 +449,8 @@ export class SuperSyncPage extends BasePage {
     // when receiving encrypted data from the server
     const needsEncryptionEnabled = config.isEncryptionEnabled && config.password;
 
-    // Login enabled SuperSync and started the first sync (like saving the config
-    // dialog did before). A password dialog may appear if the server has encrypted data.
+    // Login (or the settings save above) enabled SuperSync and started the first
+    // sync. A password dialog may appear if the server has encrypted data.
     await this.page.waitForTimeout(1000);
 
     // Define locators for dialogs we might see
@@ -351,7 +459,9 @@ export class SuperSyncPage extends BasePage {
     const enableEncryptionDialog = this.page.locator('dialog-enable-encryption');
 
     // Wait for config dialog to close, password dialog to appear, or
-    // mandatory encryption setup dialog to appear (SuperSync requires encryption)
+    // mandatory encryption setup dialog to appear (SuperSync requires encryption).
+    // Only the re-enable path above has the config dialog open; after a login
+    // 'config_closed' resolves at once and the dialogs are handled below.
     const configDialogClosed = await Promise.race([
       configDialog
         .waitFor({ state: 'hidden', timeout: 15000 })
