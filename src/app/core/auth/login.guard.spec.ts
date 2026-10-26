@@ -6,8 +6,13 @@ import { SuperSyncAuthService } from '../../op-log/sync-providers/super-sync/sup
 describe('LoginGuard', () => {
   let getSession: jasmine.Spy;
   let guard: LoginGuard;
+  let originalFetch: typeof window.fetch;
+  let fetchSpy: jasmine.Spy;
 
   beforeEach(() => {
+    originalFetch = window.fetch;
+    fetchSpy = jasmine.createSpy('fetch');
+    window.fetch = fetchSpy as unknown as typeof window.fetch;
     getSession = jasmine.createSpy('getSession');
     TestBed.configureTestingModule({
       providers: [
@@ -21,6 +26,10 @@ describe('LoginGuard', () => {
     guard = TestBed.inject(LoginGuard);
   });
 
+  afterEach(() => {
+    window.fetch = originalFetch;
+  });
+
   it('allows when a session exists', async () => {
     getSession.and.resolveTo({ userId: 1, email: 'a@b.c' });
     expect(await guard.canActivate()).toBe(true);
@@ -32,10 +41,9 @@ describe('LoginGuard', () => {
   });
 
   it('only reads the cached token, so it works offline', async () => {
-    spyOn(window, 'fetch');
     getSession.and.resolveTo({ userId: 1, email: 'a@b.c' });
     expect(await guard.canActivate()).toBe(true);
-    expect(window.fetch).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   // shortcut: IS_LOGIN_REQUIRED is a const, so the "false allows" branch is not unit-testable.

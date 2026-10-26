@@ -20,6 +20,7 @@ describe('SuperSyncAuthService', () => {
   let manager: jasmine.SpyObj<SyncProviderManager>;
   let cfg: jasmine.SpyObj<GlobalConfigService>;
   let fetchSpy: jasmine.Spy;
+  let originalFetch: typeof window.fetch;
 
   beforeEach(() => {
     manager = jasmine.createSpyObj('SyncProviderManager', [
@@ -34,7 +35,13 @@ describe('SuperSyncAuthService', () => {
       ],
     });
     service = TestBed.inject(SuperSyncAuthService);
-    fetchSpy = spyOn(window, 'fetch');
+    originalFetch = window.fetch;
+    fetchSpy = jasmine.createSpy('fetch');
+    window.fetch = fetchSpy as unknown as typeof window.fetch;
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
   });
 
   it('login posts normalized credentials and returns the session without saving', async () => {
