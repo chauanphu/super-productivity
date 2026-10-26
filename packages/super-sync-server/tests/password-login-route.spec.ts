@@ -54,13 +54,18 @@ describe('POST /api/login/password', () => {
 
   it('500 + logged (without PII) when the DB fails, not 401', async () => {
     const spy = vi.spyOn(Logger, 'error').mockImplementation(() => undefined);
-    findUnique.mockRejectedValue(new Error('db down'));
+    // Prisma error messages can echo query arguments such as the email.
+    class PrismaClientKnownRequestError extends Error {}
+    findUnique.mockRejectedValue(
+      new PrismaClientKnownRequestError('Unique failed on email secret@b.com'),
+    );
     const res = await post({ email: 'secret@b.com', password: 'hunter2' });
     expect(res.statusCode).toBe(500);
     expect(res.json().error).not.toBe('Invalid credentials');
     expect(spy).toHaveBeenCalledTimes(1);
     const logged = JSON.stringify(spy.mock.calls);
-    expect(logged).toContain('db down');
+    expect(logged).toContain('PrismaClientKnownRequestError');
+    expect(logged).not.toContain('Unique failed');
     expect(logged).not.toContain('secret@b.com');
     expect(logged).not.toContain('hunter2');
   });

@@ -181,8 +181,9 @@ export const apiRoutes = async (fastify: FastifyInstance): Promise<void> => {
         if (err instanceof Error && err.message === 'Invalid credentials') {
           return reply.status(401).send({ error: 'Invalid credentials' });
         }
-        const errMsg = err instanceof Error ? err.message : 'Unknown error';
-        Logger.error(`Password login error: ${errMsg}`);
+        // Never log err.message: Prisma messages can echo query args (the email).
+        const errClass = err instanceof Error ? err.constructor.name : typeof err;
+        Logger.error(`Password login error [LOGIN_500]: ${errClass}`);
         return reply.status(500).send({ error: 'Login failed. Please try again.' });
       }
     },

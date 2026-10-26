@@ -7,7 +7,7 @@ vi.mock('../src/db', () => ({
 }));
 
 import { prisma } from '../src/db';
-import { setPassword } from '../scripts/set-password';
+import { parseSetPasswordArgs, setPassword } from '../scripts/set-password';
 
 const user = prisma.user as unknown as Record<'findUnique' | 'create' | 'update', Mock>;
 
@@ -48,5 +48,39 @@ describe('setPassword', () => {
     await expect(setPassword('a@b.co', 'short')).rejects.toThrow();
     expect(user.create).not.toHaveBeenCalled();
     expect(user.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects passwords over 72 bytes (bcrypt would truncate silently)', async () => {
+    await expect(setPassword('a@b.co', 'é'.repeat(37))).rejects.toThrow(/72 bytes/);
+    expect(user.findUnique).not.toHaveBeenCalled();
+    user.findUnique.mockResolvedValue(null);
+    await expect(setPassword('a@b.co', 'x'.repeat(72))).resolves.toEqual({
+      created: true,
+    });
+  });
+
+  it('bumps tokenVersion only with revokeSessions', async () => {
+    user.findUnique.mockResolvedValue({ id: 7, tokenVersion: 3 });
+    await setPassword('a@b.co', 'correct-horse-battery', { revokeSessions: true });
+    expect(user.update.mock.calls[0][0].data.tokenVersion).toEqual({ increment: 1 });
+  });
+});
+
+describe('parseSetPasswordArgs', () => {
+  it('reads email, password and --revoke-sessions in any order', () => {
+    expect(parseSetPasswordArgs(['--revoke-sessions', 'a@b.co', 'pw'], {})).toEqual({
+      email: 'a@b.co',
+      password: 'pw',
+      revokeSessions: true,
+    });
+  });
+
+  it('falls back to SET_PASSWORD_PASSWORD when the password is omitted', () => {
+    expect(parseSetPasswordArgs(['a@b.co'], { SET_PASSWORD_PASSWORD: 'envpw' })).toEqual({
+      email: 'a@b.co',
+      password: 'envpw',
+      revokeSessions: false,
+    });
+    expect(parseSetPasswordArgs(['a@b.co'], {}).password).toBeUndefined();
   });
 });
