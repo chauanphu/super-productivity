@@ -1,0 +1,50 @@
+<form
+  class="login"
+  (ngSubmit)="submit()"
+>
+  <h2>{{ T.F.SYNC.LOGIN.TITLE | translate }}</h2>
+  <label>
+    {{ T.F.SYNC.LOGIN.L_SERVER_URL | translate }}
+    <input
+      type="url"
+      name="baseUrl"
+      required
+      [(ngModel)]="baseUrl"
+    />
+  </label>
+  <label>
+    {{ T.F.SYNC.LOGIN.L_EMAIL | translate }}
+    <input
+      type="email"
+      name="email"
+      autocomplete="username"
+      required
+      [(ngModel)]="email"
+    />
+  </label>
+  <label>
+    {{ T.F.SYNC.LOGIN.L_PASSWORD | translate }}
+    <input
+      type="password"
+      name="password"
+      autocomplete="current-password"
+      required
+      [(ngModel)]="password"
+    />
+  </label>
+  @if (errorKey(); as key) {
+    <p
+      class="error"
+      role="alert"
+    >
+      {{ key | translate }}
+    </p>
+  }
+  <button
+    mat-flat-button
+    type="submit"
+    [disabled]="isSubmitting()"
+  >
+    {{ T.F.SYNC.LOGIN.SUBMIT | translate }}
+  </button>
+</form>

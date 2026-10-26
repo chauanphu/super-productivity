@@ -1338,6 +1338,16 @@
           "S_TEST_SUCCESS": "Connection test successful! Target URL: {{url}}"
         }
       },
+      "LOGIN": {
+        "ERR_INVALID_CREDENTIALS": "Invalid email or password",
+        "ERR_OFFLINE": "You are offline. Connect to the internet to log in.",
+        "ERR_SERVER": "Server problem or too many attempts. Please try again later.",
+        "L_EMAIL": "Email",
+        "L_PASSWORD": "Password",
+        "L_SERVER_URL": "Server URL",
+        "SUBMIT": "Log in",
+        "TITLE": "Log in to Super Productivity"
+      },
       "S": {
         "ALREADY_IN_SYNC": "Already in sync",
         "ARCHIVE_OPERATION_FAILED": "Archive operation failed. Some cleanup may not have completed.",

@@ -1,0 +1,18 @@
+.login {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  max-width: 400px;
+  margin: var(--s4) auto;
+  padding: var(--s2);
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-half);
+}
+
+.error {
+  color: var(--c-warn);
+}
