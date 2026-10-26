@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build:
-    name: Build and push image to GHCR
+    name: Build and push planner image to GHCR
     if: github.repository == 'chauanphu/super-productivity'
     runs-on: ubuntu-latest
     permissions:
@@ -50,7 +50,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf
         with:
-          images: ghcr.io/chauanphu/super-productivity
+          images: ghcr.io/chauanphu/planner
           tags: |
             type=raw,value=latest
             type=sha
@@ -62,19 +62,25 @@ jobs:
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
+          file: packages/super-sync-server/Dockerfile
+          # Server + Angular app on one origin (no UNSPLASH_* args: this target does not use them)
+          target: planner
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BUILDKIT_CONTEXT_KEEP_GIT_DIR=1
-            UNSPLASH_KEY=${{ secrets.UNSPLASH_KEY }}
-            UNSPLASH_CLIENT_ID=${{ secrets.UNSPLASH_CLIENT_ID }}
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # Deploys the planner stack (planner-db + planner-app) in ~/e-web/planner. It deliberately
+  # leaves the old static `super-productivity` container and ~/e-web/super-productivity alone:
+  # NPM keeps forwarding to it until the owner points the planner.captechvn.com Proxy Host at
+  # planner-app:1900. After that switch, clean up by hand once:
+  #   cd ~/e-web/super-productivity && docker compose down && cd .. && rm -r super-productivity
   deploy:
-    name: Deploy to 192.168.1.253 (~/e-web/super-productivity)
+    name: Deploy planner stack to 192.168.1.253 (~/e-web/planner)
     needs: build
     if: github.repository == 'chauanphu/super-productivity'
     runs-on: [self-hosted, linux, sp-deploy]
@@ -93,32 +99,44 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Copy compose file and pull the new image
+      # .env (secrets) and backup.sh/crontab are managed by hand on the host; never touch them.
+      - name: Install compose file
         run: |
           set -euo pipefail
-          mkdir -p "$HOME/e-web/super-productivity"
-          cp deploy/planner/docker-compose.yml "$HOME/e-web/super-productivity/docker-compose.yml"
-          cd "$HOME/e-web/super-productivity"
-          docker compose pull
+          dir="$HOME/e-web/planner"
+          mkdir -p "$dir"
+          if [ ! -f "$dir/.env" ]; then
+            echo "::error::$dir/.env is missing. Create it by hand on the host (see deploy/planner-stack/docker-compose.yml for the required keys); CI never creates it."
+            exit 1
+          fi
+          cd "$dir"
+          if [ -f docker-compose.yml ]; then
+            cp docker-compose.yml "docker-compose.yml.bak-$(date +%Y%m%d-%H%M%S)"
+            ls -1t docker-compose.yml.bak-* | tail -n +4 | xargs -r rm -f --
+          fi
+          cp "$GITHUB_WORKSPACE/deploy/planner-stack/docker-compose.yml" docker-compose.yml
 
-      - name: Start the container
+      - name: Pull and start the stack
         run: |
           set -euo pipefail
-          cd "$HOME/e-web/super-productivity"
+          cd "$HOME/e-web/planner"
+          docker compose pull planner-app
           docker compose up -d --remove-orphans
           docker image prune -f
 
-      - name: Wait for the container to become healthy
+      # Uses the image's HEALTHCHECK (wget /health, start period 30s, interval 30s).
+      - name: Wait for planner-app to become healthy
         run: |
           set -euo pipefail
-          for _ in $(seq 1 30); do
-            status=$(docker inspect --format '{{.State.Health.Status}}' super-productivity)
+          status=unknown
+          for _ in $(seq 1 45); do
+            status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' planner-app || echo missing)
             if [ "$status" = "healthy" ]; then
-              echo "super-productivity is healthy"
+              echo "planner-app is healthy"
               exit 0
             fi
             sleep 2
           done
-          echo "super-productivity did not become healthy (last status: $status)"
-          docker logs --tail 50 super-productivity
+          echo "::error::planner-app did not become healthy within 90s (last status: $status)"
+          docker logs --tail 80 planner-app 2>&1 || true
           exit 1
