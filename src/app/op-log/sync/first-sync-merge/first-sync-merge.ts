@@ -6,6 +6,10 @@ import { GlobalConfigState } from '../../../features/config/global-config.model'
 import { INBOX_PROJECT } from '../../../features/project/project.const';
 import { TODAY_TAG } from '../../../features/tag/tag.const';
 import { DEFAULT_GLOBAL_CONFIG } from '../../../features/config/default-global-config.const';
+import { Note } from '../../../features/note/note.model';
+import { TaskRepeatCfg } from '../../../features/task-repeat-cfg/task-repeat-cfg.model';
+import { IssueProvider } from '../../../features/issue/issue.model';
+import { TimeTrackingState } from '../../../features/time-tracking/time-tracking.model';
 
 /**
  * Pure first-login merge (spec decision 3). Entities are matched by ID only.
@@ -18,6 +22,11 @@ export type FirstSyncMergePayload = {
   projects: Project[];
   tasks: Task[];
   tags: Tag[];
+  notes: Note[];
+  taskRepeatCfgs: TaskRepeatCfg[];
+  issueProviders: IssueProvider[];
+  /** only (context, date) entries the remote lacks */
+  timeTracking: TimeTrackingState;
   globalConfig: GlobalConfigState | null;
   archiveTasks: TaskCopy[];
 };
@@ -100,9 +109,15 @@ export const buildMergePayload = (
     }
   }
   const conflictIds = new Set(conflicts.map((c) => c.projectId));
+  const isRemoteChosen = (pid: string | null | undefined | false): boolean =>
+    !!pid && conflictIds.has(pid) && choices[pid] === 'REMOTE';
   const localProjects = map(local.project);
   const remoteProjects = map(remote.project);
   const remoteTasks = map(remote.task);
+  const remoteArchived = {
+    ...map(remote.archiveYoung?.task),
+    ...map(remote.archiveOld?.task),
+  };
 
   // --- projects + tasks ---
   const pushedProjects = new Map<string, Project>();
@@ -115,6 +130,8 @@ export const buildMergePayload = (
 
   const payloadTasks = new Map<string, Task>();
   for (const t of values(local.task)) {
+    // remote archive wins: never re-activate a task archived on another device
+    if (remoteArchived[t.id]) continue;
     const isPushed = isRealProjectId(t.projectId, localProjects)
       ? pushedProjects.has(t.projectId)
       : // Inbox / orphan: by ID, newer `modified` wins, remote wins ties (nothing to write)
@@ -136,20 +153,21 @@ export const buildMergePayload = (
   }
 
   // --- keep containers consistent with the final (remote + payload) task set ---
-  // Ids are dropped only if a payload task no longer belongs there (or the id
-  // vanishes from a pushed local container); missing members are appended.
-  // So with LOCAL, remote-only tasks of that project stay listed (upsert-only payload).
+  // An id is kept only if its final task exists and belongs there; missing members
+  // are appended. So with LOCAL, remote-only tasks of that project stay listed
+  // (the payload is upsert-only).
   const finalTaskList = Object.values(finalTasks).filter((t): t is Task => !!t);
+  const keep = (listed: readonly string[], belongs: (t: Task) => boolean): string[] =>
+    listed.filter((id) => {
+      const t = finalTasks[id];
+      return !!t && belongs(t);
+    });
   const reconcile = (
     listed: readonly string[],
-    members: string[],
     belongs: (t: Task) => boolean,
-    isPushed: boolean,
   ): string[] => {
-    const kept = listed.filter((id) => {
-      const pt = payloadTasks.get(id);
-      return pt ? belongs(pt) : !isPushed || !!finalTasks[id];
-    });
+    const kept = keep(listed, belongs);
+    const members = finalTaskList.filter(belongs).map((t) => t.id);
     return [...kept, ...members.filter((id) => !kept.includes(id))];
   };
 
@@ -158,43 +176,24 @@ export const buildMergePayload = (
   for (const p of Object.values(allProjects)) {
     if (!p) continue;
     const belongs = (t: Task): boolean => t.projectId === p.id && !t.parentId;
-    const isPushed = pushedProjects.has(p.id);
-    const members = finalTaskList.filter(belongs).map((t) => t.id);
-    const backlogTaskIds = reconcile(p.backlogTaskIds, [], belongs, isPushed);
+    const backlogTaskIds = keep(p.backlogTaskIds, belongs);
+    const taskIds = keep(p.taskIds, belongs);
     const localBacklog = localProjects[p.id]?.backlogTaskIds ?? [];
-    const missing = members.filter(
-      (id) => !p.taskIds.includes(id) && !p.backlogTaskIds.includes(id),
-    );
-    const toBacklog = missing.filter((id) => localBacklog.includes(id));
-    const taskIds = [
-      ...reconcile(p.taskIds, [], belongs, isPushed),
-      ...missing.filter((id) => !toBacklog.includes(id)),
-    ];
-    backlogTaskIds.push(...toBacklog);
+    for (const t of finalTaskList.filter(belongs)) {
+      if (taskIds.includes(t.id) || backlogTaskIds.includes(t.id)) continue;
+      (localBacklog.includes(t.id) ? backlogTaskIds : taskIds).push(t.id);
+    }
     if (
-      isPushed ||
+      pushedProjects.has(p.id) ||
       !sameIds(taskIds, p.taskIds) ||
       !sameIds(backlogTaskIds, p.backlogTaskIds)
     ) {
-      // notes are not part of the payload; keep only notes that exist remotely
-      const remoteNotes = map(remote.note);
-      projects.push({
-        ...p,
-        taskIds,
-        backlogTaskIds,
-        noteIds: isPushed ? p.noteIds.filter((id) => !!remoteNotes[id]) : p.noteIds,
-      });
+      projects.push({ ...p, taskIds, backlogTaskIds });
     }
   }
 
   for (const parent of finalTaskList) {
-    const belongs = (t: Task): boolean => t.parentId === parent.id;
-    const subTaskIds = reconcile(
-      parent.subTaskIds,
-      finalTaskList.filter(belongs).map((t) => t.id),
-      belongs,
-      payloadTasks.has(parent.id),
-    );
+    const subTaskIds = reconcile(parent.subTaskIds, (t) => t.parentId === parent.id);
     if (!sameIds(subTaskIds, parent.subTaskIds)) {
       payloadTasks.set(parent.id, { ...parent, subTaskIds });
     }
@@ -206,34 +205,67 @@ export const buildMergePayload = (
   const localOnlyTags = values(local.tag).filter((t) => !remoteTags[t.id]);
   for (const tag of [...values(remote.tag), ...localOnlyTags]) {
     if (tag.id === TODAY_TAG.id) continue;
-    const belongs = (t: Task): boolean => t.tagIds.includes(tag.id);
-    const isLocalOnly = !remoteTags[tag.id];
-    const taskIds = reconcile(
-      tag.taskIds,
-      finalTaskList.filter(belongs).map((t) => t.id),
-      belongs,
-      isLocalOnly,
-    );
-    if (isLocalOnly || !sameIds(taskIds, tag.taskIds)) tags.push({ ...tag, taskIds });
+    const taskIds = reconcile(tag.taskIds, (t) => t.tagIds.includes(tag.id));
+    if (!remoteTags[tag.id] || !sameIds(taskIds, tag.taskIds)) {
+      tags.push({ ...tag, taskIds });
+    }
   }
 
-  // --- archive: local-only by ID; archived tasks of REMOTE-chosen projects follow the choice ---
-  const remoteKnown = {
-    ...map(remote.archiveYoung?.task),
-    ...map(remote.archiveOld?.task),
-    ...remoteTasks,
-  };
+  // --- archive: local-only by ID, additive (also for REMOTE-chosen projects) ---
   const archiveTasks: TaskCopy[] = [
     ...values(local.archiveYoung?.task),
     ...values(local.archiveOld?.task),
   ]
-    .filter((t) => !remoteKnown[t.id])
-    .filter((t) => !(conflictIds.has(t.projectId) && choices[t.projectId] === 'REMOTE'))
+    .filter((t) => !remoteArchived[t.id] && !remoteTasks[t.id])
     .map(stripToday);
+
+  // --- related entities: local-only by ID, not for REMOTE-chosen projects ---
+  const localOnly = <T extends { id: string }>(
+    l: EntityMap<T>,
+    r: EntityMap<T>,
+    projectIdOf: (e: T) => string | null | undefined | false,
+  ): T[] => {
+    const rm = map(r);
+    return values(l).filter((e) => !rm[e.id] && !isRemoteChosen(projectIdOf(e)));
+  };
+  const notes = localOnly(local.note, remote.note, (n) => n.projectId);
+  const taskRepeatCfgs = localOnly(
+    local.taskRepeatCfg,
+    remote.taskRepeatCfg,
+    (c) => c.projectId,
+  );
+  const issueProviders = localOnly(
+    local.issueProvider,
+    remote.issueProvider,
+    (i) => i.defaultProjectId,
+  );
+
+  // --- time tracking: (context, date) entries the remote lacks (active + archives) ---
+  const ttSources = (d: AppDataComplete): (TimeTrackingState | undefined)[] => [
+    d.timeTracking,
+    d.archiveYoung?.timeTracking,
+    d.archiveOld?.timeTracking,
+  ];
+  const timeTracking: TimeTrackingState = { project: {}, tag: {} };
+  for (const kind of ['project', 'tag'] as const) {
+    const remoteHas = (ctx: string, date: string): boolean =>
+      ttSources(remote).some((s) => !!s?.[kind]?.[ctx]?.[date]);
+    for (const src of ttSources(local)) {
+      for (const [ctx, byDate] of Object.entries(src?.[kind] ?? {})) {
+        if (kind === 'project' && isRemoteChosen(ctx)) continue;
+        for (const [date, entry] of Object.entries(byDate ?? {})) {
+          if (remoteHas(ctx, date) || timeTracking[kind][ctx]?.[date]) continue;
+          timeTracking[kind][ctx] = { ...timeTracking[kind][ctx], [date]: entry };
+        }
+      }
+    }
+  }
 
   // "remote has config" = present and not identical to DEFAULT_GLOBAL_CONFIG
   // (a fresh account yields defaults). shortcut: an account whose user kept every
   // default is treated as "no config"; upgrade if the server exposes a presence marker.
+  // The `sync` section is pushed as-is: credentials live in the credential store, and
+  // receivers keep their own isEnabled/syncProvider/isEncryptionEnabled (loadAllData reducer).
   const remoteHasConfig =
     !!remote.globalConfig &&
     stableJson(remote.globalConfig) !== stableJson(DEFAULT_GLOBAL_CONFIG);
@@ -242,6 +274,10 @@ export const buildMergePayload = (
     projects,
     tasks: [...payloadTasks.values()],
     tags,
+    notes,
+    taskRepeatCfgs,
+    issueProviders,
+    timeTracking,
     globalConfig: remoteHasConfig ? null : local.globalConfig,
     archiveTasks,
   };

@@ -12,6 +12,13 @@ import { Tag } from '../../../features/tag/tag.model';
 import { TODAY_TAG } from '../../../features/tag/tag.const';
 import { DEFAULT_GLOBAL_CONFIG } from '../../../features/config/default-global-config.const';
 import { GlobalConfigState } from '../../../features/config/global-config.model';
+import { Note } from '../../../features/note/note.model';
+import {
+  DEFAULT_TASK_REPEAT_CFG,
+  TaskRepeatCfg,
+} from '../../../features/task-repeat-cfg/task-repeat-cfg.model';
+import { IssueProvider } from '../../../features/issue/issue.model';
+import { TimeTrackingState } from '../../../features/time-tracking/time-tracking.model';
 
 const task = (id: string, p: Partial<Task> = {}): Task => ({
   ...DEFAULT_TASK,
@@ -53,7 +60,13 @@ const data = (
     tasks?: Task[];
     tags?: Tag[];
     archive?: Task[];
+    archiveOld?: Task[];
     globalConfig?: GlobalConfigState;
+    notes?: Note[];
+    repeatCfgs?: TaskRepeatCfg[];
+    issueProviders?: IssueProvider[];
+    timeTracking?: TimeTrackingState;
+    archiveTimeTracking?: TimeTrackingState;
   } = {},
 ): AppDataComplete => {
   const m = createAppDataCompleteMock();
@@ -62,10 +75,46 @@ const data = (
     project: entities(o.projects ?? []),
     task: { ...m.task, ...entities(o.tasks ?? []) },
     tag: entities(o.tags ?? []),
+    note: { ...m.note, ...entities(o.notes ?? []) },
+    taskRepeatCfg: entities(o.repeatCfgs ?? []),
+    issueProvider: entities(o.issueProviders ?? []),
+    timeTracking: o.timeTracking ?? { project: {}, tag: {} },
     globalConfig: o.globalConfig ?? DEFAULT_GLOBAL_CONFIG,
-    archiveYoung: { ...m.archiveYoung, task: entities(o.archive ?? []) },
+    archiveYoung: {
+      ...m.archiveYoung,
+      task: entities(o.archive ?? []),
+      timeTracking: o.archiveTimeTracking ?? { project: {}, tag: {} },
+    },
+    archiveOld: { ...m.archiveOld, task: entities(o.archiveOld ?? []) },
   };
 };
+
+const note = (id: string, projectId: string | null): Note => ({
+  id,
+  projectId,
+  isPinnedToToday: false,
+  content: id,
+  created: 1,
+  modified: 1,
+});
+const repeatCfg = (id: string, projectId: string | null): TaskRepeatCfg => ({
+  ...DEFAULT_TASK_REPEAT_CFG,
+  id,
+  projectId,
+});
+const issueProvider = (id: string, defaultProjectId: string | null): IssueProvider =>
+  ({
+    id,
+    isEnabled: true,
+    issueProviderKey: 'GITHUB',
+    defaultProjectId,
+  }) as IssueProvider;
+
+// REMOTE-resolved conflict project P1 used by several tests
+const conflictLocal = (extra: Parameters<typeof data>[0] = {}): AppDataComplete =>
+  data({ projects: [project('P1', { title: 'Local' })], ...extra });
+const conflictRemote = (extra: Parameters<typeof data>[0] = {}): AppDataComplete =>
+  data({ projects: [project('P1', { title: 'Remote' })], ...extra });
 
 const ids = (items: { id: string }[]): string[] => items.map((i) => i.id).sort();
 const byId = <T extends { id: string }>(items: T[], id: string): T | undefined =>
@@ -253,4 +302,76 @@ describe('first-sync-merge', () => {
     const remote = data({ archive: [task('a1')], tasks: [task('a3')] });
     expect(ids(buildMergePayload(local, remote, {}).archiveTasks)).toEqual(['a2']);
   });
+  it('keeps archived tasks of a REMOTE-resolved project (archive is additive)', () => {
+    const p = buildMergePayload(
+      conflictLocal({ archive: [task('a1', { projectId: 'P1' })] }),
+      conflictRemote(),
+      { P1: 'REMOTE' },
+    );
+    expect(ids(p.archiveTasks)).toEqual(['a1']);
+  });
+
+  it('never re-activates a task that is archived on the remote', () => {
+    const local = data({
+      projects: [project('LP', { taskIds: ['x1'] })],
+      tasks: [task('x1', { projectId: 'LP' }), task('x2', { modified: 99 })],
+    });
+    const remote = data({ archive: [task('x1')], archiveOld: [task('x2')] });
+    const p = buildMergePayload(local, remote, {});
+    expect(p.tasks).toEqual([]);
+    expect(byId(p.projects, 'LP')?.taskIds).toEqual([]);
+  });
+
+  it('drops stale ids from reconciled containers', () => {
+    const local = data({ tasks: [task('n')] });
+    const remote = data({
+      projects: [project(INBOX_PROJECT.id, { taskIds: ['ghost'] })],
+    });
+    const p = buildMergePayload(local, remote, {});
+    expect(byId(p.projects, INBOX_PROJECT.id)?.taskIds).toEqual(['n']);
+  });
+
+  it('carries local-only notes and keeps pushed project noteIds', () => {
+    const local = conflictLocal({
+      projects: [project('LP', { noteIds: ['n1'] }), project('P1', { title: 'Local' })],
+      notes: [note('n1', 'LP'), note('n2', null), note('n3', 'P1'), note('n4', null)],
+    });
+    const remote = conflictRemote({ notes: [note('n4', null)] });
+    const p = buildMergePayload(local, remote, { P1: 'REMOTE' });
+    expect(ids(p.notes)).toEqual(['n1', 'n2']);
+    expect(byId(p.projects, 'LP')?.noteIds).toEqual(['n1']);
+  });
+
+  it('carries local-only repeat cfgs and issue providers, not those of REMOTE projects', () => {
+    const local = conflictLocal({
+      repeatCfgs: [repeatCfg('r1', null), repeatCfg('r2', 'P1'), repeatCfg('r3', null)],
+      issueProviders: [issueProvider('i1', null), issueProvider('i2', 'P1')],
+    });
+    const remote = conflictRemote({
+      repeatCfgs: [repeatCfg('r3', null)],
+    });
+    const p = buildMergePayload(local, remote, { P1: 'REMOTE' });
+    expect(ids(p.taskRepeatCfgs)).toEqual(['r1']);
+    expect(ids(p.issueProviders)).toEqual(['i1']);
+  });
+
+  /* eslint-disable @typescript-eslint/naming-convention -- date keys */
+  it('merges time tracking entries the remote lacks, skipping REMOTE projects', () => {
+    const local = conflictLocal({
+      timeTracking: {
+        project: { LP: { '2026-01-01': { s: 1 } }, P1: { '2026-01-01': { s: 2 } } },
+        tag: { T: { '2026-01-01': { s: 3 }, '2026-01-02': { s: 4 } } },
+      },
+      archiveTimeTracking: { project: { LP: { '2025-01-01': { s: 5 } } }, tag: {} },
+    });
+    const remote = conflictRemote({
+      timeTracking: { project: {}, tag: { T: { '2026-01-02': { s: 9 } } } },
+    });
+    const p = buildMergePayload(local, remote, { P1: 'REMOTE' });
+    expect(p.timeTracking).toEqual({
+      project: { LP: { '2026-01-01': { s: 1 }, '2025-01-01': { s: 5 } } },
+      tag: { T: { '2026-01-01': { s: 3 } } },
+    });
+  });
+  /* eslint-enable @typescript-eslint/naming-convention */
 });
