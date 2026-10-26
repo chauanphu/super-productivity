@@ -1,15 +1,14 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { isEmailAllowed } from './email-allowlist';
-import * as jwt from 'jsonwebtoken';
 import {
   verifyEmail,
   replaceToken,
   requestLoginMagicLink,
   verifyLoginMagicLink,
   registerWithMagicLink,
-  getJwtSecret,
-  JWT_EXPIRY,
+  signAuthToken,
+  loginWithPassword,
 } from './auth';
 import {
   generateRegistrationOptions,
@@ -72,6 +71,11 @@ const MagicLinkRegisterSchema = z.object({
   }),
 });
 
+const LoginPasswordSchema = z.object({
+  email: z.string().email('Invalid email format'),
+  password: z.string().min(1).max(256),
+});
+
 const MagicLinkRequestSchema = z.object({
   email: z.string().email('Invalid email format'),
 });
@@ -95,6 +99,7 @@ type MagicLinkVerifyBody = z.infer<typeof MagicLinkVerifySchema>;
 // Known safe error messages that can be shown to clients
 const SAFE_ERROR_MESSAGES = new Set([
   'Email not verified',
+  'Invalid credentials',
   'Invalid verification token',
   'Verification token has expired',
   'Registration successful. Please check your email to verify your account.',
@@ -154,6 +159,28 @@ export const apiRoutes = async (fastify: FastifyInstance): Promise<void> => {
         return reply.status(400).send({
           error: getSafeErrorMessage(err, 'Verification failed. Please try again.'),
         });
+      }
+    },
+  );
+
+  fastify.post(
+    '/login/password',
+    { config: { rateLimit: { max: 10, timeWindow: '15 minutes' } } },
+    async (req, reply) => {
+      const parseResult = LoginPasswordSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return reply.status(400).send({
+          error: 'Validation failed',
+          details: parseResult.error.issues,
+        });
+      }
+      try {
+        const { email, password } = parseResult.data;
+        return reply.send(await loginWithPassword(email, password));
+      } catch (err) {
+        return reply
+          .status(401)
+          .send({ error: getSafeErrorMessage(err, 'Invalid credentials') });
       }
     },
   );
@@ -374,11 +401,7 @@ export const apiRoutes = async (fastify: FastifyInstance): Promise<void> => {
         const tokenVersion = user?.tokenVersion ?? 0;
 
         // Sign JWT (same format as password login)
-        const token = jwt.sign(
-          { userId: userInfo.userId, email: userInfo.email, tokenVersion },
-          getJwtSecret(),
-          { expiresIn: JWT_EXPIRY },
-        );
+        const token = signAuthToken(userInfo.userId, userInfo.email, tokenVersion);
 
         return reply.send({
           token,
