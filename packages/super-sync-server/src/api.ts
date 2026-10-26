@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { isEmailAllowed } from './email-allowlist';
 import {
@@ -22,6 +22,17 @@ import {
 import { authenticate, getAuthUser } from './middleware';
 import { Logger } from './logger';
 import { prisma } from './db';
+
+// REGISTRATION_DISABLED=true closes self-registration; the operator creates users with
+// `node dist/scripts/set-password.js`. Read per request so tests can toggle it.
+const rejectIfRegistrationDisabled = async (
+  _req: FastifyRequest,
+  reply: FastifyReply,
+): Promise<FastifyReply | void> => {
+  if (process.env.REGISTRATION_DISABLED === 'true') {
+    return reply.status(403).send({ error: 'Registration is disabled' });
+  }
+};
 
 // Zod Schemas
 const VerifyEmailSchema = z.object({
@@ -260,6 +271,7 @@ export const apiRoutes = async (fastify: FastifyInstance): Promise<void> => {
   fastify.post<{ Body: PasskeyRegisterOptionsBody }>(
     '/register/passkey/options',
     {
+      onRequest: rejectIfRegistrationDisabled,
       config: {
         rateLimit: {
           max: 50,
@@ -300,6 +312,7 @@ export const apiRoutes = async (fastify: FastifyInstance): Promise<void> => {
   fastify.post<{ Body: PasskeyRegisterVerifyBody }>(
     '/register/passkey/verify',
     {
+      onRequest: rejectIfRegistrationDisabled,
       config: {
         rateLimit: {
           max: 50,
@@ -531,6 +544,7 @@ export const apiRoutes = async (fastify: FastifyInstance): Promise<void> => {
   fastify.post<{ Body: MagicLinkRegisterBody }>(
     '/register/magic-link',
     {
+      onRequest: rejectIfRegistrationDisabled,
       config: {
         rateLimit: {
           max: 50,

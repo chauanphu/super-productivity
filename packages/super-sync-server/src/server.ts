@@ -3,14 +3,13 @@ import Fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
-import fastifyStatic from '@fastify/static';
 import * as path from 'path';
 import { loadConfigFromEnv, ServerConfig, PrivacyConfig } from './config';
 import { Logger } from './logger';
 import { prisma, disconnectDb } from './db';
 import websocket from '@fastify/websocket';
 import { apiRoutes } from './api';
-import { pageRoutes } from './pages';
+import { registerStaticContent, resolveWebRoot, isWebAppRequest } from './static-content';
 import { syncRoutes, startCleanupJobs, stopCleanupJobs } from './sync';
 import { wsRoutes } from './sync/websocket.routes';
 import {
@@ -95,6 +94,8 @@ export const createServer = (
       return fastifyServer;
     },
     start: async (): Promise<string> => {
+      const webRoot = resolveWebRoot(fullConfig.webRoot);
+
       fastifyServer = Fastify({
         logger: false, // We use our own logger
         bodyLimit: 20 * 1024 * 1024, // 20MB - needed for large imports
@@ -129,6 +130,8 @@ export const createServer = (
         await fastifyServer.register(rateLimit, {
           max: 500,
           timeWindow: '15 minutes',
+          // A cold app load plus service-worker prefetch is hundreds of static requests.
+          ...(webRoot && { allowList: (req) => isWebAppRequest(req) }),
         });
       }
 
@@ -154,12 +157,6 @@ export const createServer = (
           preflight: true,
         });
       }
-
-      // Serve static files
-      await fastifyServer.register(fastifyStatic, {
-        root: path.join(__dirname, '../../public'),
-        prefix: '/',
-      });
 
       // WebSocket support for real-time sync notifications
       // maxPayload: only app-level pong messages expected from clients (~20 bytes)
@@ -200,8 +197,9 @@ export const createServer = (
         Logger.warn('TEST MODE ENABLED - Test routes available at /api/test/*');
       }
 
-      // Page Routes
-      await fastifyServer.register(pageRoutes, { prefix: '/' });
+      // Angular app from WEB_ROOT, or the legacy public/ pages + page routes
+      await registerStaticContent(fastifyServer, webRoot);
+      if (webRoot) Logger.info(`Serving web app from ${webRoot}`);
 
       // Start cleanup jobs
       startCleanupJobs();
