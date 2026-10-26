@@ -1,5 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
+import { provideRouter } from '@angular/router';
+import { AccountSessionService } from '../../../core/auth/account-session.service';
+import { SuperSyncAuthService } from '../../../op-log/sync-providers/super-sync/super-sync-auth.service';
 import { MatDialog, MatDialogRef } from '@angular/material/dialog';
 import { TranslateModule } from '@ngx-translate/core';
 import { FormlyModule } from '@ngx-formly/core';
@@ -76,6 +79,12 @@ describe('DialogSyncCfgComponent', () => {
         { provide: GlobalConfigService, useValue: mockGlobalConfigService },
         { provide: SnackService, useValue: mockSnackService },
         { provide: MatDialog, useValue: mockMatDialog },
+        provideRouter([]),
+        { provide: AccountSessionService, useValue: { logout: () => Promise.resolve() } },
+        {
+          provide: SuperSyncAuthService,
+          useValue: { getSession: () => Promise.resolve(null) },
+        },
       ],
     });
     // Replace the Formly-based template with a minimal placeholder so we can

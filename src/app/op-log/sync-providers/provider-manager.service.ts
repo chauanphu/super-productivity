@@ -35,6 +35,8 @@ export type SyncStatusChangePayload =
  *
  * Providers are lazily loaded on first use to reduce initial bundle size.
  */
+export const LAST_SYNCED_PROVIDER_KEY = 'SP_LAST_SYNCED_PROVIDER_ID';
+
 @Injectable({
   providedIn: 'root',
 })
@@ -272,14 +274,12 @@ export class SyncProviderManager {
     }
   }
 
-  private readonly _LAST_SYNCED_PROVIDER_KEY = 'SP_LAST_SYNCED_PROVIDER_ID';
-
   getLastSyncedProviderId(): SyncProviderId | null {
-    return toSyncProviderId(localStorage.getItem(this._LAST_SYNCED_PROVIDER_KEY));
+    return toSyncProviderId(localStorage.getItem(LAST_SYNCED_PROVIDER_KEY));
   }
 
   setLastSyncedProviderId(id: SyncProviderId): void {
-    localStorage.setItem(this._LAST_SYNCED_PROVIDER_KEY, id);
+    localStorage.setItem(LAST_SYNCED_PROVIDER_KEY, id);
   }
 
   /**

@@ -1216,6 +1216,30 @@ export class OperationLogStoreService {
     this._vectorClockCache = null;
   }
 
+  /**
+   * Deletes all user data in SUP_OPS (logout / account switch, LocalDataWipeService):
+   * ops (synced + unsynced), state cache, import backups incl. the pending first-sync
+   * merge marker, vector clock, archives and stored profiles.
+   */
+  async clearAllUserData(): Promise<void> {
+    await this._ensureInit();
+    const stores = [
+      STORE_NAMES.OPS,
+      STORE_NAMES.STATE_CACHE,
+      STORE_NAMES.IMPORT_BACKUP,
+      STORE_NAMES.VECTOR_CLOCK,
+      STORE_NAMES.ARCHIVE_YOUNG,
+      STORE_NAMES.ARCHIVE_OLD,
+      STORE_NAMES.PROFILE_DATA,
+    ] as const;
+    const tx = this.db.transaction(stores, 'readwrite');
+    await Promise.all([...stores.map((s) => tx.objectStore(s).clear()), tx.done]);
+    this._appliedOpIdsCache = null;
+    this._cacheLastSeq = 0;
+    this._invalidateUnsyncedCache();
+    this._vectorClockCache = null;
+  }
+
   // ============================================================
   // Import Backup (pre-import state preservation)
   // ============================================================

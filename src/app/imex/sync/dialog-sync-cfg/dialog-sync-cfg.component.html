@@ -1,6 +1,28 @@
 <h1 mat-dialog-title>{{ T.F.SYNC.D_INITIAL_CFG.TITLE | translate }}</h1>
 
 <mat-dialog-content>
+  @if (_tmpUpdatedCfg?.syncProvider === SUPER_SYNC) {
+    <p>
+      @if (session(); as s) {
+        {{ T.F.SYNC.ACCOUNT.SIGNED_IN_AS | translate: { email: s.email } }}
+        <button
+          (click)="logout()"
+          mat-stroked-button
+          type="button"
+        >
+          {{ T.F.SYNC.ACCOUNT.LOG_OUT | translate }}
+        </button>
+      } @else {
+        <button
+          (click)="goToLogin()"
+          mat-stroked-button
+          type="button"
+        >
+          {{ T.F.SYNC.ACCOUNT.LOG_IN | translate }}
+        </button>
+      }
+    </p>
+  }
   @if (_tmpUpdatedCfg) {
     <form [formGroup]="form">
       <formly-form

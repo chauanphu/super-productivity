@@ -462,22 +462,7 @@ export const SYNC_FORM: ConfigFormSection<SyncConfig> = {
     {
       key: 'superSync',
       fieldGroup: [
-        {
-          hideExpression: (m, v, field) =>
-            field?.parent?.parent?.model.syncProvider !== SyncProviderId.SuperSync,
-          type: 'btn',
-          templateOptions: {
-            text: T.F.SYNC.FORM.SUPER_SYNC.BTN_GET_TOKEN,
-            tooltip: T.F.SYNC.FORM.SUPER_SYNC.LOGIN_INSTRUCTIONS,
-            btnType: 'primary',
-            btnStyle: 'stroked',
-            centerBtn: true,
-            onClick: (field: any) => {
-              const baseUrl = field.model.baseUrl || SUPER_SYNC_DEFAULT_BASE_URL;
-              window.open(baseUrl, '_blank');
-            },
-          },
-        },
+        // Log in / Log out lives in DialogSyncCfgComponent (needs DI).
         {
           hideExpression: (m, v, field) =>
             field?.parent?.parent?.model.syncProvider !== SyncProviderId.SuperSync,

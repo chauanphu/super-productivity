@@ -11,6 +11,7 @@ import {
   LoginNetworkError,
   SuperSyncAuthService,
 } from '../../op-log/sync-providers/super-sync/super-sync-auth.service';
+import { AccountSessionService } from '../../core/auth/account-session.service';
 
 @Component({
   selector: 'login-page',
@@ -21,6 +22,7 @@ import {
 })
 export class LoginPageComponent {
   private _auth = inject(SuperSyncAuthService);
+  private _accountSession = inject(AccountSessionService);
   private _router = inject(Router);
 
   readonly T = T;
@@ -42,9 +44,9 @@ export class LoginPageComponent {
     this.isSubmitting.set(true);
     try {
       const session = await this._auth.login(this.baseUrl, this.email, this.password);
-      // Task 8 replaces this with AccountSessionService.completeLogin(session).
-      await this._auth.commitSession(session);
-      await this._router.navigateByUrl('/');
+      if ((await this._accountSession.completeLogin(session)) === 'DONE') {
+        await this._router.navigateByUrl('/');
+      }
     } catch (e) {
       this.errorKey.set(
         e instanceof InvalidCredentialsError

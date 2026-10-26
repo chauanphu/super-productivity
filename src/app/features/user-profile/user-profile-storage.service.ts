@@ -9,8 +9,8 @@ import { Log } from '../../core/log';
 import { CompleteBackup } from '../../op-log/sync-exports';
 import { OperationLogStoreService } from '../../op-log/persistence/operation-log-store.service';
 
-const PROFILE_META_KEY = 'sp_profile_meta';
-const PROFILE_DATA_PREFIX = 'sp_profile_data_';
+export const PROFILE_META_KEY = 'sp_profile_meta';
+export const PROFILE_DATA_PREFIX = 'sp_profile_data_';
 
 /**
  * Service for managing profile storage.
