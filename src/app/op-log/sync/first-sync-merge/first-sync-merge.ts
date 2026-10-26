@@ -171,6 +171,27 @@ export const buildMergePayload = (
     return [...kept, ...members.filter((id) => !kept.includes(id))];
   };
 
+  // --- related entities: local-only by ID, not for REMOTE-chosen projects ---
+  const localOnly = <T extends { id: string }>(
+    l: EntityMap<T>,
+    r: EntityMap<T>,
+    projectIdOf: (e: T) => string | null | undefined | false,
+  ): T[] => {
+    const rm = map(r);
+    return values(l).filter((e) => !rm[e.id] && !isRemoteChosen(projectIdOf(e)));
+  };
+  const notes = localOnly(local.note, remote.note, (n) => n.projectId);
+  const taskRepeatCfgs = localOnly(
+    local.taskRepeatCfg,
+    remote.taskRepeatCfg,
+    (c) => c.projectId,
+  );
+  const issueProviders = localOnly(
+    local.issueProvider,
+    remote.issueProvider,
+    (i) => i.defaultProjectId,
+  );
+
   const projects: Project[] = [];
   const allProjects = { ...remoteProjects, ...Object.fromEntries(pushedProjects) };
   for (const p of Object.values(allProjects)) {
@@ -183,12 +204,23 @@ export const buildMergePayload = (
       if (taskIds.includes(t.id) || backlogTaskIds.includes(t.id)) continue;
       (localBacklog.includes(t.id) ? backlogTaskIds : taskIds).push(t.id);
     }
+    // pushed projects carry their local noteIds; others get payload notes appended
+    const isPushed = pushedProjects.has(p.id);
+    const noteIds = isPushed
+      ? p.noteIds
+      : [
+          ...p.noteIds,
+          ...notes
+            .filter((n) => n.projectId === p.id && !p.noteIds.includes(n.id))
+            .map((n) => n.id),
+        ];
     if (
-      pushedProjects.has(p.id) ||
+      isPushed ||
       !sameIds(taskIds, p.taskIds) ||
-      !sameIds(backlogTaskIds, p.backlogTaskIds)
+      !sameIds(backlogTaskIds, p.backlogTaskIds) ||
+      !sameIds(noteIds, p.noteIds)
     ) {
-      projects.push({ ...p, taskIds, backlogTaskIds });
+      projects.push({ ...p, taskIds, backlogTaskIds, noteIds });
     }
   }
 
@@ -218,27 +250,6 @@ export const buildMergePayload = (
   ]
     .filter((t) => !remoteArchived[t.id] && !remoteTasks[t.id])
     .map(stripToday);
-
-  // --- related entities: local-only by ID, not for REMOTE-chosen projects ---
-  const localOnly = <T extends { id: string }>(
-    l: EntityMap<T>,
-    r: EntityMap<T>,
-    projectIdOf: (e: T) => string | null | undefined | false,
-  ): T[] => {
-    const rm = map(r);
-    return values(l).filter((e) => !rm[e.id] && !isRemoteChosen(projectIdOf(e)));
-  };
-  const notes = localOnly(local.note, remote.note, (n) => n.projectId);
-  const taskRepeatCfgs = localOnly(
-    local.taskRepeatCfg,
-    remote.taskRepeatCfg,
-    (c) => c.projectId,
-  );
-  const issueProviders = localOnly(
-    local.issueProvider,
-    remote.issueProvider,
-    (i) => i.defaultProjectId,
-  );
 
   // --- time tracking: (context, date) entries the remote lacks (active + archives) ---
   const ttSources = (d: AppDataComplete): (TimeTrackingState | undefined)[] => [

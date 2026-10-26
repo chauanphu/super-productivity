@@ -342,6 +342,21 @@ describe('first-sync-merge', () => {
     expect(byId(p.projects, 'LP')?.noteIds).toEqual(['n1']);
   });
 
+  it('lists a local-only note in its existing, not-pushed remote project', () => {
+    // Inbox is never a conflict/pushed project, so this is the realistic case
+    const I = INBOX_PROJECT.id;
+    const local = data({
+      projects: [project(I, { title: 'local inbox', noteIds: ['n0', 'nl'] })],
+      notes: [note('n0', I), note('nl', I)],
+    });
+    const remoteInbox = project(I, { title: 'remote inbox', noteIds: ['n0'] });
+    const remote = data({ projects: [remoteInbox], notes: [note('n0', I)] });
+    expect(diffForFirstSync(local, remote).conflicts).toEqual([]);
+    const p = buildMergePayload(local, remote, {});
+    expect(ids(p.notes)).toEqual(['nl']);
+    expect(byId(p.projects, I)).toEqual({ ...remoteInbox, noteIds: ['n0', 'nl'] });
+  });
+
   it('carries local-only repeat cfgs and issue providers, not those of REMOTE projects', () => {
     const local = conflictLocal({
       repeatCfgs: [repeatCfg('r1', null), repeatCfg('r2', 'P1'), repeatCfg('r3', null)],
