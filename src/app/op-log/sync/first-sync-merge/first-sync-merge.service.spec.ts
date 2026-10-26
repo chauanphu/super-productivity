@@ -310,9 +310,9 @@ describe('FirstSyncMergeService', () => {
       expect((pendingInDb as FirstSyncMergePending | null) ?? null).toBeNull();
     });
 
-    it('E2E on device only: snackbar, CANCELLED, nothing touched', async () => {
+    it('E2E on device only: snackbar, E2E_MISMATCH, nothing touched', async () => {
       encryptKey = 'k';
-      expect(await service.run(provider, USER_ID)).toBe('CANCELLED');
+      expect(await service.run(provider, USER_ID)).toBe('E2E_MISMATCH');
       expect(snack.open).toHaveBeenCalledWith(
         jasmine.objectContaining({ msg: T.F.SYNC.S.FIRST_SYNC_MERGE_E2E_MISMATCH }),
       );

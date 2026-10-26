@@ -399,6 +399,11 @@ export class SyncWrapperService {
           this._providerManager.setSyncStatus('UNKNOWN_OR_CHANGED');
           return 'HANDLED_ERROR';
         }
+        if (mergeResult === 'E2E_MISMATCH') {
+          // the service already showed the error snackbar
+          this._providerManager.setSyncStatus('ERROR');
+          return 'HANDLED_ERROR';
+        }
       }
 
       // Perform actual sync: download first, then upload

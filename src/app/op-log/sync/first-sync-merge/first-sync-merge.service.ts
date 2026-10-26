@@ -26,7 +26,8 @@ import { OpLog } from '../../../core/log';
 import { buildMergePayload, diffForFirstSync } from './first-sync-merge';
 import { splitFirstSyncMergePayload } from './first-sync-merge-chunks';
 
-export type FirstSyncMergeResult = 'MERGED' | 'CANCELLED' | 'SKIPPED';
+/** 'E2E_MISMATCH': error snackbar already shown, caller must not show another one */
+export type FirstSyncMergeResult = 'MERGED' | 'CANCELLED' | 'SKIPPED' | 'E2E_MISMATCH';
 
 /** Persisted in IndexedDB (import_backup store) while a merge is in flight. */
 export type FirstSyncMergePending = {
@@ -114,9 +115,10 @@ export class FirstSyncMergeService {
   async run(
     provider: OperationSyncCapable,
     userId: number,
-  ): Promise<'MERGED' | 'CANCELLED'> {
-    if (!(await this._checkEncryption(provider))) {
-      return 'CANCELLED';
+  ): Promise<'MERGED' | 'CANCELLED' | 'E2E_MISMATCH'> {
+    const e2e = await this._checkEncryption(provider);
+    if (e2e !== 'OK') {
+      return e2e;
     }
     const pending: FirstSyncMergePending = {
       userId,
@@ -210,17 +212,19 @@ export class FirstSyncMergeService {
    * Spec: account E2E without a key here → ask for the key first; E2E on one side
    * only → not supported. Probes the first server op (encryption resets the server).
    */
-  private async _checkEncryption(provider: OperationSyncCapable): Promise<boolean> {
+  private async _checkEncryption(
+    provider: OperationSyncCapable,
+  ): Promise<'OK' | 'CANCELLED' | 'E2E_MISMATCH'> {
     const probe = await provider.downloadOps(0, undefined, 1);
     if (!probe.ops.length) {
-      return true;
+      return 'OK';
     }
     const isRemoteEncrypted = !!probe.ops[0].op.isPayloadEncrypted;
     let hasKey = !!(await provider.getEncryptKey?.());
     if (isRemoteEncrypted && !hasKey) {
       hasKey = await this._promptForKey();
       if (!hasKey) {
-        return false;
+        return 'CANCELLED';
       }
     }
     if (isRemoteEncrypted !== hasKey) {
@@ -229,9 +233,9 @@ export class FirstSyncMergeService {
         type: 'ERROR',
         msg: T.F.SYNC.S.FIRST_SYNC_MERGE_E2E_MISMATCH,
       });
-      return false;
+      return 'E2E_MISMATCH';
     }
-    return true;
+    return 'OK';
   }
 
   // shortcut: the dialog's force-overwrite button waits for the sync we are inside

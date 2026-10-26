@@ -464,6 +464,17 @@ describe('SyncWrapperService', () => {
       expect(mockSyncService.uploadPendingOps).not.toHaveBeenCalled();
     });
 
+    it('E2E mismatch: no cancel snackbar on top of the error, no normal sync', async () => {
+      configSubject.next(createMockSyncConfig(SyncProviderId.SuperSync));
+      mockFirstSyncMerge.runIfNeeded.and.resolveTo('E2E_MISMATCH');
+
+      const result = await service.sync();
+
+      expect(result).toBe('HANDLED_ERROR');
+      expect(mockSnackService.open).not.toHaveBeenCalled();
+      expect(mockSyncService.downloadRemoteOps).not.toHaveBeenCalled();
+    });
+
     it('surfaces merge errors and skips the normal sync', async () => {
       configSubject.next(createMockSyncConfig(SyncProviderId.SuperSync));
       mockFirstSyncMerge.runIfNeeded.and.rejectWith(new Error('archive write failed'));
